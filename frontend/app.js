@@ -175,7 +175,7 @@ function checkActiveSourcePolling(sources) {
     if (!pollInterval) {
       pollInterval = setInterval(() => {
         loadNotebookDetails(currentNotebookId);
-      }, 3000);
+      }, 1500);
     }
   } else {
     if (pollInterval) {
@@ -194,8 +194,12 @@ async function ingestUrl(url) {
       body: JSON.stringify({ notebook_id: currentNotebookId, url: url.trim() })
     });
     if (res.ok) {
-      // Reload notebook details to see newly created source
-      setTimeout(() => loadNotebookDetails(currentNotebookId), 800);
+      // Start polling immediately and reload details
+      if (!pollInterval) {
+        pollInterval = setInterval(() => loadNotebookDetails(currentNotebookId), 1500);
+      }
+      setTimeout(() => loadNotebookDetails(currentNotebookId), 500);
+      setTimeout(() => loadNotebookDetails(currentNotebookId), 1500);
     }
   } catch (err) {
     console.error("Ingestion failed:", err);

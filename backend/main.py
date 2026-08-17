@@ -145,13 +145,15 @@ def process_single_video_task(source_id: str, url: str):
 
 def process_ingest_pipeline(notebook_id: str, url: str):
     """
-    Detects if URL is a single video or playlist, registers sources, and processes sequentially.
+    Detects if URL is a single video or playlist, pre-registers ALL sources immediately
+    so they appear in the GUI right away, and then processes them with the audio & whisper pipeline.
     """
     try:
-        # Check if playlist
+        # Check if playlist / extract video items
         videos = YouTubeDownloader.get_playlist_videos(url)
         logger.info(f"Discovered {len(videos)} video(s) from URL: {url}")
 
+        registered_sources = []
         for v in videos:
             source = Storage.add_source(
                 notebook_id=notebook_id,
@@ -162,8 +164,14 @@ def process_ingest_pipeline(notebook_id: str, url: str):
                 duration=v.get("duration", 0),
                 thumbnail_url=v.get("thumbnail_url", "")
             )
-            # Process synchronously in this background worker thread
-            process_single_video_task(source["id"], v["url"])
+            registered_sources.append(source)
+
+        logger.info(f"Pre-registered {len(registered_sources)} source(s) in GUI.")
+
+        # Process each source
+        for idx, src in enumerate(registered_sources):
+            logger.info(f"Processing source {idx + 1}/{len(registered_sources)}: {src['title']}")
+            process_single_video_task(src["id"], src["url"])
 
     except Exception as e:
         logger.error(f"Failed during playlist/video ingestion: {e}", exc_info=True)
