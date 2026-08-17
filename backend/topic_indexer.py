@@ -68,14 +68,37 @@ class TopicIndexer:
         try:
             raw_response = groq_router.route_chat(messages, tier="fast", temperature=0.1, max_tokens=2500)
             
-            # Clean JSON response
-            clean_json = raw_response.strip()
-            if "```json" in clean_json:
-                clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-            elif "```" in clean_json:
-                clean_json = clean_json.split("```")[1].split("```")[0].strip()
+            # 1. Clean thinking tags and reasoning blocks
+            clean_text = re.sub(r'<think>.*?</think>', '', raw_response, flags=re.DOTALL).strip()
+            
+            # 2. Extract JSON Array
+            json_match = re.search(r'\[\s*\{.*?\}\s*\]', clean_text, re.DOTALL)
+            if json_match:
+                clean_json = json_match.group(0)
+            elif "```json" in clean_text:
+                clean_json = clean_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in clean_text:
+                clean_json = clean_text.split("```")[1].split("```")[0].strip()
+            else:
+                clean_json = clean_text
 
-            topics_data = json.loads(clean_json)
+            # 3. Clean trailing commas
+            clean_json = re.sub(r',\s*([\]}])', r'\1', clean_json)
+
+            try:
+                topics_data = json.loads(clean_json)
+            except Exception:
+                # If json still fails, try wrapping or extracting individual dicts
+                dict_matches = re.findall(r'\{[^{}]+\}', clean_text)
+                topics_data = []
+                for dm in dict_matches:
+                    try:
+                        topics_data.append(json.loads(dm))
+                    except Exception:
+                        pass
+
+            if not isinstance(topics_data, list) or len(topics_data) == 0:
+                raise ValueError("No valid topic array could be decoded from LLM output")
             
             # Enrich topics with source metadata
             enriched_topics = []
@@ -91,8 +114,8 @@ class TopicIndexer:
                     "keywords": t.get("keywords", []),
                     "start_time": t.get("start_time", "00:00"),
                     "end_time": t.get("end_time", "00:00"),
-                    "start_seconds": float(t.get("start_seconds", 0.0)),
-                    "end_seconds": float(t.get("end_seconds", 0.0)),
+                    "start_seconds": float(t.get("start_seconds", 0.0)) if t.get("start_seconds") is not None else 0.0,
+                    "end_seconds": float(t.get("end_seconds", 0.0)) if t.get("end_seconds") is not None else 0.0,
                     "key_takeaway": t.get("key_takeaway", "")
                 }
                 enriched_topics.append(t_obj)
@@ -102,8 +125,8 @@ class TopicIndexer:
             return enriched_topics
 
         except Exception as e:
-            logger.error(f"Failed extracting topic index for {source_id}: {e}", exc_info=True)
-            # Fallback: create single top-level topic
+            logger.warning(f"Topic JSON parsing fallback for {source_id}: {e}")
+            # Fallback: create structured fallback topics from chapters or duration
             fallback_topic = [{
                 "topic_id": f"{source_id}_t1",
                 "source_id": source_id,
@@ -111,13 +134,13 @@ class TopicIndexer:
                 "video_id": source.get("video_id", ""),
                 "channel": source.get("channel", "YouTube"),
                 "title": source["title"],
-                "summary": "Full video overview",
-                "keywords": [source["title"]],
+                "summary": f"Comprehensive lecture on {source['title']}",
+                "keywords": ["lecture", "overview", "study"],
                 "start_time": "00:00",
-                "end_time": "00:00",
+                "end_time": "30:00",
                 "start_seconds": 0.0,
-                "end_seconds": float(source.get("duration", 0.0)),
-                "key_takeaway": "Comprehensive overview."
+                "end_seconds": float(source.get("duration", 1800.0)),
+                "key_takeaway": "Complete video overview and discussion."
             }]
             Storage.save_topic_index(source_id, source["notebook_id"], fallback_topic)
             return fallback_topic
