@@ -202,26 +202,30 @@ class GroqKeyModelRouter:
 
                 except RateLimitError as e:
                     err_msg = str(e)
+                    # Extract suggested retry duration if provided by Groq
+                    wait_match = re.search(r'try again in ([\d\.]+)s', err_msg)
+                    suggested_wait = float(wait_match.group(1)) + 1.0 if wait_match else 20.0
+
                     with self.lock:
                         slot.inflight_requests = max(0, slot.inflight_requests - 1)
-                        slot.mark_error(cooldown_duration=30.0)
+                        slot.mark_error(cooldown_duration=suggested_wait)
                         # If org-level TPM limit reached for this specific model, immediately advance to next model
                         if "TPM" in err_msg or "tokens per minute" in err_msg or "Rate limit reached for model" in err_msg:
-                            logger.warning(f"⚠️ Model '{current_model}' hit Org TPM limit. Cascading immediately to next model...")
+                            logger.warning(f"⚠️ Model '{current_model}' hit Org TPM limit. Cascading immediately to next candidate...")
                             for s in self.slots.get(current_model, []):
-                                s.cooldown_until = time.time() + 25.0
+                                s.cooldown_until = time.time() + suggested_wait
                             last_error = e
                             break # Skip remaining keys on this exhausted model and cascade!
                     last_error = e
                 except (APIError, InternalServerError) as e:
                     with self.lock:
                         slot.inflight_requests = max(0, slot.inflight_requests - 1)
-                        slot.mark_error(cooldown_duration=20.0)
+                        slot.mark_error(cooldown_duration=15.0)
                     # If payload too large (413), truncate messages for subsequent retries
                     if "413" in str(e) or "Payload Too Large" in str(e) or "too large" in str(e).lower():
                         for msg in messages:
-                            if len(msg.get("content", "")) > 4000:
-                                msg["content"] = msg["content"][:4000] + "\n...[content trimmed for payload size]"
+                            if len(msg.get("content", "")) > 3500:
+                                msg["content"] = msg["content"][:3500] + "\n...[content trimmed for payload size]"
                     last_error = e
                 except Exception as e:
                     with self.lock:
@@ -229,7 +233,10 @@ class GroqKeyModelRouter:
                     logger.error(f"Error on Key #{slot.key_idx + 1} ({current_model}): {e}")
                     last_error = e
 
-        # Final safety attempt: allow earliest cooldown slot across any model
+        # Final polite recovery: if all candidate models are temporarily busy, wait for the earliest slot
+        logger.info("⏳ All model tiers currently at TPM limit. Politely pacing and waiting for cooldown window...")
+        time.sleep(6.0)
+
         for fallback_model in candidate_models:
             try:
                 slot = self._select_best_slot(fallback_model, allow_cooldown=True)
@@ -244,7 +251,8 @@ class GroqKeyModelRouter:
                         slot.inflight_requests = max(0, slot.inflight_requests - 1)
                         slot.mark_success()
                     return response.choices[0].message.content or ""
-            except Exception:
+            except Exception as e:
+                last_error = e
                 continue
 
         raise RuntimeError(f"Chat failed across all {len(self.keys)} keys & model cascades: {last_error}")

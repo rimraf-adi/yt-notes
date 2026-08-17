@@ -81,12 +81,17 @@ class ParallelSynthesizer:
                 for i, s in enumerate(ready_sources)
             ]
 
-        # 3. Parallel Chapter Synthesis across 8 Groq Keys
-        def synthesize_section_worker(item: Dict[str, Any]) -> Tuple[int, str]:
-            ch_num = item.get("chapter_num", 1)
+        # 3. Paced Chapter Synthesis across Groq Keys & Models
+        def synthesize_section_worker(item_and_idx: Tuple[int, Dict[str, Any]]) -> Tuple[int, str]:
+            worker_idx, item = item_and_idx
+            ch_num = item.get("chapter_num", worker_idx + 1)
             ch_title = item.get("chapter_title", f"Chapter {ch_num}")
             focus = item.get("focus_areas", "")
             target_topics = item.get("target_topics", [])
+
+            # Stagger dispatch to gently pace TPM/TPD budgets
+            if worker_idx > 0:
+                time.sleep(worker_idx * 1.5)
 
             # Pull exact transcript spans for matched topics
             relevant_spans = []
@@ -103,11 +108,11 @@ class ParallelSynthesizer:
                 src = ready_sources[(ch_num - 1) % len(ready_sources)]
                 t = Storage.get_transcript(src["id"])
                 if t and t.get("segments"):
-                    relevant_spans.append("\n".join([f"[{s.get('timestamp_str', '00:00')}] {s['text']}" for s in t["segments"][:100]]))
+                    relevant_spans.append("\n".join([f"[{s.get('timestamp_str', '00:00')}] {s['text']}" for s in t["segments"][:80]]))
 
-            context_blob = "\n\n".join(relevant_spans[:3])
-            if len(context_blob) > 6000:
-                context_blob = context_blob[:6000] + "\n...[transcript excerpt]"
+            context_blob = "\n\n".join(relevant_spans[:2])
+            if len(context_blob) > 4500:
+                context_blob = context_blob[:4500] + "\n...[transcript excerpt]"
 
             sys_prompt = (
                 f"You are a distinguished research scholar and lead academic author.\n"
@@ -134,13 +139,13 @@ class ParallelSynthesizer:
                 {"role": "user", "content": f"Primary Source Evidence:\n\n{context_blob}\n\nSynthesize Chapter {ch_num} now."}
             ]
 
-            logger.info(f"🚀 [Parallel Synthesizer] Key worker synthesizing Chapter {ch_num}: '{ch_title}'")
-            chapter_md = groq_router.route_chat(msgs, tier="heavy", temperature=0.2, max_tokens=2500)
+            logger.info(f"🚀 [Parallel Synthesizer] Worker {worker_idx + 1} synthesizing Chapter {ch_num}: '{ch_title}'")
+            chapter_md = groq_router.route_chat(msgs, tier="heavy", temperature=0.2, max_tokens=2200)
             return ch_num, chapter_md
 
-        # Execute all sections concurrently across 8 Groq keys
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            rendered_chapters = list(executor.map(synthesize_section_worker, outline))
+        # Execute sections in a paced, distributed pipeline
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            rendered_chapters = list(executor.map(synthesize_section_worker, enumerate(outline)))
 
         rendered_chapters.sort(key=lambda x: x[0])
         chapters_content = [c[1] for c in rendered_chapters]
