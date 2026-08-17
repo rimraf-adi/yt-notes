@@ -87,8 +87,11 @@ class YouTubeDownloader:
                     progress_callback(50.0, "Audio downloaded. Extracting...")
 
         ydl_opts = {
-            "format": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
+            # Strictly lowest-bitrate audio only (lightweight, instant download)
+            "format": "worstaudio[ext=m4a]/worstaudio[ext=opus]/worstaudio/ba[abr<=48]/ba[abr<=64]/ba/w",
+            "format_sort": ["+size", "+br"],
             "outtmpl": output_template,
+            "concurrent_fragment_downloads": 4,
             "extractor_args": {
                 "youtube": {
                     "player_client": ["android", "ios", "mweb", "web"],
@@ -106,12 +109,13 @@ class YouTubeDownloader:
                 {
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
-                    "preferredquality": "64", # 64kbps is crystal clear for speech and very compact (~28MB for 1 hour)
+                    "preferredquality": "32", # 32kbps mono: ~14MB for a 1-hour lecture, lightning fast!
                 }
             ],
             "postprocessor_args": [
                 "-ar", "16000",
-                "-ac", "1"
+                "-ac", "1",
+                "-b:a", "32k"
             ],
             "progress_hooks": [ydl_progress_hook],
             "quiet": True,
