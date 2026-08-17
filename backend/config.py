@@ -29,4 +29,4 @@ LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 FAST_LLM_MODEL = os.getenv("FAST_LLM_MODEL", "llama-3.1-8b-instant")
 REASONING_MODEL = os.getenv("REASONING_MODEL", "deepseek-r1-distill-llama-70b")
 
-DB_PATH = DATA_DIR / "notebooklm.db"
+DB_PATH = Path(os.getenv("SQLITE_DB_PATH", str(DATA_DIR / "notebooklm.db")))

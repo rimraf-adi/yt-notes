@@ -14,8 +14,13 @@ from backend.topic_indexer import TopicIndexer
 from backend.parallel_synthesizer import ParallelSynthesizer
 
 @pytest.fixture(autouse=True)
-def setup_database():
+def setup_database(tmp_path, monkeypatch):
+    test_db = tmp_path / "test_notebooklm.db"
+    monkeypatch.setenv("SQLITE_DB_PATH", str(test_db))
     init_db()
+    yield
+    if test_db.exists():
+        test_db.unlink(missing_ok=True)
 
 def test_storage_notebook_crud():
     # 1. Create Notebook

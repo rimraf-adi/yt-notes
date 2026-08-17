@@ -28,20 +28,128 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ----------------- Persistent Session & Query Params -----------------
-# 1. Check URL query params first, then session state, then SQLite database
-active_nb_id = st.query_params.get("notebook_id") or st.session_state.get("notebook_id")
+# ----------------- View State & Persistent Query Params -----------------
+# Determine if we are in Gallery View (Home) or Studio View
+param_nb_id = st.query_params.get("notebook_id")
+all_notebooks = Storage.list_notebooks()
+
+# Default to gallery if user requested gallery or if no query param exists
+if "view_mode" not in st.session_state:
+    if param_nb_id and Storage.get_notebook(param_nb_id):
+        st.session_state.view_mode = "studio"
+        st.session_state.notebook_id = param_nb_id
+    else:
+        st.session_state.view_mode = "gallery"
+        st.session_state.notebook_id = None
+
+# If in gallery mode, render the NotebookLM Notebooks Gallery
+if st.session_state.get("view_mode") == "gallery":
+    st.title("🎓 YouTube NotebookLM")
+    st.caption("AI Research Assistant • Grounded RAG • 8-Key Rotating Groq Engine (LLaMA 3.3 70B & DeepSeek R1)")
+
+    col_top1, col_top2 = st.columns([3, 1])
+    with col_top1:
+        st.subheader("📚 Your Notebooks")
+    with col_top2:
+        if st.button("➕ Create New Notebook", type="primary", use_container_width=True):
+            st.session_state.show_create_modal = True
+            st.rerun()
+
+    if st.session_state.get("show_create_modal", False):
+        with st.container(border=True):
+            st.markdown("#### ➕ Create New Notebook")
+            nb_name_input = st.text_input("Notebook Title", placeholder="e.g. Stanford CS229 Machine Learning", key="create_nb_name")
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                if st.button("Create & Open", type="primary", use_container_width=True):
+                    title = nb_name_input.strip() if nb_name_input.strip() else f"Study Notebook ({datetime.now().strftime('%I:%M %p')})"
+                    new_nb = Storage.create_notebook(title)
+                    st.session_state.notebook_id = new_nb["id"]
+                    st.session_state.notebook_title = new_nb["title"]
+                    st.session_state.view_mode = "studio"
+                    st.session_state.show_create_modal = False
+                    st.query_params["notebook_id"] = new_nb["id"]
+                    st.rerun()
+            with col_c2:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.show_create_modal = False
+                    st.rerun()
+
+    # Telemetry metrics
+    all_notebooks = Storage.list_notebooks()
+    total_sources = sum(len(Storage.get_sources(nb["id"])) for nb in all_notebooks)
+    total_artifacts = sum(len(Storage.get_notebook_artifacts(nb["id"])) for nb in all_notebooks)
+    matrix_stats = groq_router.get_router_matrix_stats()
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Cached Notebooks", len(all_notebooks))
+    m2.metric("Ingested Videos", total_sources)
+    m3.metric("Studio Artifacts", total_artifacts)
+    m4.metric("Active Groq Keys", f"{matrix_stats.get('total_keys', 8)}/8 Pool")
+
+    st.divider()
+
+    if not all_notebooks:
+        st.info("👋 You don't have any notebooks yet. Click **➕ Create New Notebook** above to ingest YouTube videos and generate study notes.")
+    else:
+        # Render Notebook Cards in 2 columns
+        for i in range(0, len(all_notebooks), 2):
+            row_cols = st.columns(2)
+            for j in range(2):
+                if i + j < len(all_notebooks):
+                    nb = all_notebooks[i + j]
+                    sources = Storage.get_sources(nb["id"])
+                    artifacts = Storage.get_notebook_artifacts(nb["id"])
+                    ready_sources = sum(1 for s in sources if s.get("status") == "ready")
+                    updated_dt = datetime.fromtimestamp(nb.get("updated_at", time.time())).strftime("%b %d, %Y • %I:%M %p")
+
+                    with row_cols[j]:
+                        with st.container(border=True):
+                            st.markdown(f"### 📓 {nb['title']}")
+                            st.caption(f"🕒 Last active: {updated_dt}")
+                            
+                            c_info1, c_info2 = st.columns(2)
+                            c_info1.markdown(f"🎬 **{len(sources)} Sources** ({ready_sources} Ready)")
+                            c_info2.markdown(f"📚 **{len(artifacts)} Studio Notes**")
+
+                            st.divider()
+                            c_btn1, c_btn2, c_btn3 = st.columns([3, 1, 1])
+                            with c_btn1:
+                                if st.button(f"🚀 Open Notebook", key=f"open_{nb['id']}", type="primary", use_container_width=True):
+                                    st.session_state.notebook_id = nb["id"]
+                                    st.session_state.notebook_title = nb["title"]
+                                    st.session_state.view_mode = "studio"
+                                    st.session_state.current_artifact = artifacts[0] if artifacts else None
+                                    st.query_params["notebook_id"] = nb["id"]
+                                    st.rerun()
+                            with c_btn2:
+                                if st.button("✏️", key=f"ren_card_{nb['id']}", help="Rename notebook"):
+                                    st.session_state[f"rename_active_{nb['id']}"] = not st.session_state.get(f"rename_active_{nb['id']}", False)
+                                    st.rerun()
+                            with c_btn3:
+                                if st.button("🗑️", key=f"del_card_{nb['id']}", help="Delete notebook"):
+                                    Storage.delete_notebook(nb["id"])
+                                    st.rerun()
+
+                            if st.session_state.get(f"rename_active_{nb['id']}", False):
+                                ren_text = st.text_input("New Name", value=nb["title"], key=f"input_ren_{nb['id']}")
+                                if st.button("Save", key=f"save_ren_{nb['id']}"):
+                                    if ren_text.strip():
+                                        Storage.rename_notebook(nb["id"], ren_text.strip())
+                                    st.session_state[f"rename_active_{nb['id']}"] = False
+                                    st.rerun()
+
+    st.stop()
+
+# ----------------- Studio View -----------------
+active_nb_id = st.session_state.get("notebook_id") or param_nb_id
 active_nb = Storage.get_notebook(active_nb_id) if active_nb_id else None
 
 if not active_nb:
-    # If no valid notebook is active, load the most recent notebook from SQLite
-    all_nbs = Storage.list_notebooks()
-    if all_nbs:
-        active_nb = all_nbs[0]
-    else:
-        # Create initial notebook only if database is completely empty
-        now_str = datetime.now().strftime("%I:%M %p")
-        active_nb = Storage.create_notebook(f"Study Notebook ({now_str})")
+    st.session_state.view_mode = "gallery"
+    st.session_state.notebook_id = None
+    st.query_params.clear()
+    st.rerun()
 
 notebook_id = active_nb["id"]
 st.session_state.notebook_id = notebook_id
@@ -55,11 +163,19 @@ if "current_artifact" not in st.session_state or st.session_state.current_artifa
 
 # ----------------- Sidebar: Sources & Notebook Manager -----------------
 with st.sidebar:
+    # Home button to return to gallery
+    if st.button("⬅ 🏠 All Notebooks", use_container_width=True):
+        st.session_state.view_mode = "gallery"
+        st.session_state.notebook_id = None
+        st.query_params.clear()
+        st.rerun()
+
+    st.divider()
     st.title("🎓 YouTube NotebookLM")
     st.markdown(":green-background[⚡ 8-Key Groq Rotation Active]")
     st.divider()
 
-    # Notebook Switcher / Rename / Creator
+    # Notebook Header / Rename / Creator
     col_nb1, col_nb2, col_nb3 = st.columns([3, 1, 1])
     with col_nb1:
         st.subheader(f"📓 {st.session_state.get('notebook_title', 'Notebook')}")
@@ -69,14 +185,8 @@ with st.sidebar:
             st.rerun()
     with col_nb3:
         if st.button("➕", help="Create new clean notebook"):
-            now_str = datetime.now().strftime("%I:%M %p")
-            new_nb = Storage.create_notebook(f"Study Notebook ({now_str})")
-            st.session_state.notebook_id = new_nb["id"]
-            st.session_state.notebook_title = new_nb["title"]
-            st.session_state.chat_history = []
-            st.session_state.current_artifact = None
-            st.session_state.is_renaming_nb = False
-            st.query_params["notebook_id"] = new_nb["id"]
+            st.session_state.show_create_modal = True
+            st.session_state.view_mode = "gallery"
             st.rerun()
 
     # Explicit Rename Input Box if active
