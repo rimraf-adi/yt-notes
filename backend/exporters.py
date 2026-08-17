@@ -184,6 +184,25 @@ class NoteExporter:
         return text
 
     @staticmethod
+    def _format_inline_markdown(text: str) -> str:
+        """
+        Safely converts markdown inline formatting and <br> tags into ReportLab XML syntax.
+        """
+        # 1. Normalize any <br>, <br/>, <br /> or newlines to temporary marker
+        normalized = re.sub(r'<\s*br\s*/?\s*>', '___BR_TAG___', text, flags=re.IGNORECASE)
+        # 2. Escape HTML entities (&, <, >)
+        escaped = html.escape(normalized)
+        # 3. Restore <br/> tags as valid ReportLab XML line breaks
+        escaped = escaped.replace('___BR_TAG___', '<br/>')
+        # 4. Bold, italic, code
+        escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+        escaped = re.sub(r'\*(.*?)\*', r'<i>\1</i>', escaped)
+        escaped = re.sub(r'`(.*?)`', r'<font name="Courier" color="#2563eb">\1</font>', escaped)
+        # 5. Clean up any residual escaped &lt;br...&gt;
+        escaped = re.sub(r'&lt;\s*br\s*/?\s*&gt;', '<br/>', escaped, flags=re.IGNORECASE)
+        return escaped
+
+    @staticmethod
     def markdown_to_pdf(title: str, author: str, md_content: str, output_filename: Optional[str] = None) -> str:
         """
         3. Compiled PDF (.pdf) Export with Full Unicode Normalization & Table Support
@@ -284,7 +303,7 @@ class NoteExporter:
             parent=styles['Normal'],
             fontName='Helvetica',
             fontSize=8,
-            leading=10.5,
+            leading=11,
             textColor=colors.HexColor('#334155')
         )
 
@@ -343,7 +362,8 @@ class NoteExporter:
                 is_header = (r_idx == 0)
                 st_to_use = table_header_style if is_header else table_cell_style
                 for c in row:
-                    cell_p = Paragraph(html.escape(c.strip()), st_to_use)
+                    cell_formatted = NoteExporter._format_inline_markdown(c.strip())
+                    cell_p = Paragraph(cell_formatted, st_to_use)
                     row_cells.append(cell_p)
                 if row_cells:
                     formatted_data.append(row_cells)
@@ -419,39 +439,27 @@ class NoteExporter:
                 story.append(HRFlowable(width="100%", thickness=0.8, color=colors.HexColor('#cbd5e1'), spaceBefore=6, spaceAfter=6))
                 continue
 
-            # Parse line prefixes safely BEFORE html escaping
+            # Parse line prefixes safely
             if line.startswith("# "):
                 content = line[2:].strip()
-                escaped = html.escape(content)
-                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
-                story.append(Paragraph(escaped, h1_style))
+                story.append(Paragraph(NoteExporter._format_inline_markdown(content), h1_style))
             elif line.startswith("## "):
                 content = line[3:].strip()
-                escaped = html.escape(content)
-                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
-                story.append(Paragraph(escaped, h1_style))
+                story.append(Paragraph(NoteExporter._format_inline_markdown(content), h1_style))
             elif line.startswith("### "):
                 content = line[4:].strip()
-                escaped = html.escape(content)
-                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
-                story.append(Paragraph(escaped, h2_style))
+                story.append(Paragraph(NoteExporter._format_inline_markdown(content), h2_style))
             elif line.startswith("#### "):
                 content = line[5:].strip()
-                escaped = html.escape(content)
-                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
-                story.append(Paragraph(escaped, h2_style))
+                story.append(Paragraph(NoteExporter._format_inline_markdown(content), h2_style))
             elif line.startswith("- ") or line.startswith("* "):
                 content = line[2:].strip()
-                escaped = html.escape(content)
-                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
-                escaped = re.sub(r'`(.*?)`', r'<font name="Courier" color="#2563eb">\1</font>', escaped)
-                story.append(Paragraph(f"&bull; {escaped}", bullet_style))
+                formatted_b = NoteExporter._format_inline_markdown(content)
+                story.append(Paragraph(f"&bull; {formatted_b}", bullet_style))
             elif line.startswith("> "):
                 content = line[2:].strip()
-                escaped = html.escape(content)
-                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
-                escaped = re.sub(r'`(.*?)`', r'<font name="Courier" color="#2563eb">\1</font>', escaped)
-                callout_data = [[Paragraph(f"<b>Key Takeaway:</b> {escaped}", body_style)]]
+                formatted_c = NoteExporter._format_inline_markdown(content)
+                callout_data = [[Paragraph(f"<b>Key Takeaway:</b> {formatted_c}", body_style)]]
                 callout_table = Table(callout_data, colWidths=[510])
                 callout_table.setStyle(TableStyle([
                     ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#eff6ff')),
@@ -465,11 +473,7 @@ class NoteExporter:
                 story.append(callout_table)
                 story.append(Spacer(1, 3))
             else:
-                escaped = html.escape(line)
-                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
-                escaped = re.sub(r'\*(.*?)\*', r'<i>\1</i>', escaped)
-                escaped = re.sub(r'`(.*?)`', r'<font name="Courier" color="#2563eb">\1</font>', escaped)
-                story.append(Paragraph(escaped, body_style))
+                story.append(Paragraph(NoteExporter._format_inline_markdown(line), body_style))
 
         if in_table:
             flush_table()
