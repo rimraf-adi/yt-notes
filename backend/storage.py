@@ -129,6 +129,8 @@ class Storage:
         conn.close()
         return [dict(r) for r in rows]
 
+    list_notebooks = get_notebooks
+
     @staticmethod
     def get_notebook(notebook_id: str) -> Optional[Dict[str, Any]]:
         conn = get_db()
@@ -378,6 +380,8 @@ class Storage:
             d["metadata"] = json.loads(d.get("metadata_json") or "{}")
             artifacts.append(d)
         return artifacts
+
+    get_notebook_artifacts = get_artifacts_for_notebook
 
     @staticmethod
     def add_chat_message(notebook_id: str, role: str, content: str, citations: List[Dict] = None) -> Dict[str, Any]:
