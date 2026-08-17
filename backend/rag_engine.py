@@ -153,3 +153,6 @@ class RAGEngine:
 
         formatted_context = "\n---\n".join(context_blocks)
         return formatted_context, citations
+
+# Alias for compatibility
+TranscriptRAG = RAGEngine

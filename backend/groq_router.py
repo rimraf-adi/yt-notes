@@ -11,15 +11,15 @@ logger = logging.getLogger("GroqRouter")
 
 # Model Definitions by Tier for Max Throughput
 TIER_HEAVY = [
-    "llama-3.3-70b-versatile",
-    "deepseek-r1-distill-llama-70b",
-    "llama-3.1-70b-versatile"
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b",
+    "groq/compound"
 ]
 
 TIER_FAST = [
-    "llama-3.1-8b-instant",
-    "llama-3.2-3b-preview",
-    "llama-3.2-1b-preview"
+    "openai/gpt-oss-20b",
+    "groq/compound-mini",
+    "qwen/qwen3.6-27b"
 ]
 
 TIER_AUDIO = [
@@ -200,6 +200,8 @@ class GroqKeyModelRouter:
 
         raise RuntimeError(f"Chat failed across all {len(self.keys)} keys & model cascades: {last_error}")
 
+    route_chat_completion = route_chat
+
     def route_chat_stream(
         self,
         messages: List[Dict[str, str]],
@@ -352,8 +354,10 @@ class GroqKeyModelRouter:
                 "total_keys": len(self.keys),
                 "active_keys": sum(1 for k in key_summaries if "Active" in k["status"]),
                 "supported_models": list(self.slots.keys()),
-                "keys": key_summaries
+                "keys": key_summaries,
+                "key_stats": key_summaries
             }
 
 # Global Router Singleton
 groq_router = GroqKeyModelRouter()
+

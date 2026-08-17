@@ -44,7 +44,7 @@ class NoteExporter:
     @staticmethod
     def generate_html(title: str, md_content: str, author: str = "YouTube NotebookLM") -> str:
         """Generates HTML document string."""
-        path = NoteExporter.markdown_to_html(title, author, md_content)
+        path = NoteExporter.markdown_to_standalone_html(title, author, md_content)
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
 
@@ -416,6 +416,7 @@ class NoteExporter:
             f.write(full_html)
         return str(file_path)
 
-# Alias for compatibility
+# Aliases for compatibility
+NoteExporter.markdown_to_html = NoteExporter.markdown_to_standalone_html
 Exporter = NoteExporter
 
