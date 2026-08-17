@@ -139,7 +139,7 @@ class GroqKeyModelRouter:
         tier: str = "heavy", # 'heavy', 'fast', or 'auto'
         temperature: float = 0.3,
         max_tokens: int = 4096,
-        max_retries: int = 8
+        max_retries: int = 24
     ) -> str:
         """
         Executes a chat completion with maximum throughput routing.
@@ -157,11 +157,14 @@ class GroqKeyModelRouter:
         else:
             candidate_models = TIER_HEAVY + TIER_FAST if tier != "fast" else TIER_FAST + TIER_HEAVY
 
+        # Deduplicate while preserving priority order
+        candidate_models = list(dict.fromkeys(candidate_models))
+
         last_error = None
         attempt_count = 0
 
         for current_model in candidate_models:
-            for _ in range(len(self.keys)):
+            for key_attempt in range(len(self.keys)):
                 if attempt_count >= max_retries:
                     break
                 attempt_count += 1
@@ -186,9 +189,17 @@ class GroqKeyModelRouter:
                     return response.choices[0].message.content or ""
 
                 except RateLimitError as e:
+                    err_msg = str(e)
                     with self.lock:
                         slot.inflight_requests = max(0, slot.inflight_requests - 1)
-                        slot.mark_error(cooldown_duration=45.0)
+                        slot.mark_error(cooldown_duration=30.0)
+                        # If org-level TPM limit reached for this specific model, immediately advance to next model
+                        if "TPM" in err_msg or "tokens per minute" in err_msg or "Rate limit reached for model" in err_msg:
+                            logger.warning(f"⚠️ Model '{current_model}' hit Org TPM limit. Cascading immediately to next model...")
+                            for s in self.slots_by_model.get(current_model, []):
+                                s.cooldown_until = time.time() + 20.0
+                            last_error = e
+                            break # Skip remaining keys on this exhausted model and cascade!
                     last_error = e
                 except (APIError, InternalServerError) as e:
                     with self.lock:
@@ -217,17 +228,18 @@ class GroqKeyModelRouter:
         tier: str = "heavy",
         temperature: float = 0.3,
         max_tokens: int = 4096,
-        max_retries: int = 8
+        max_retries: int = 24
     ) -> Iterator[str]:
         """
         Streams chat tokens with key-model rotation and failover.
         """
         candidate_models = [model] if model else (TIER_HEAVY + TIER_FAST if tier != "fast" else TIER_FAST)
+        candidate_models = list(dict.fromkeys(candidate_models))
         last_error = None
         attempt_count = 0
 
         for current_model in candidate_models:
-            for _ in range(len(self.keys)):
+            for key_attempt in range(len(self.keys)):
                 if attempt_count >= max_retries:
                     break
                 attempt_count += 1
