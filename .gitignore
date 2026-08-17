@@ -1,0 +1,33 @@
+# Environment variables & secrets (CRITICAL - DO NOT COMMIT)
+.env
+.env.local
+.env.*.local
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Local data & SQLite databases
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary downloads & exports
+downloads/
+exports/
+
+# OS & IDE metadata
+.DS_Store
+.vscode/
+.idea/
+*.swp
