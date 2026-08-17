@@ -135,9 +135,12 @@ def process_single_video_task(source_id: str, url: str):
         except Exception as e:
             logger.warning(f"Topic indexing non-fatal error on {source_id}: {e}")
 
-        # 5. Mark Ready
+        # 5. Delete temporary audio file & chunks to save disk space
+        YouTubeDownloader.cleanup_audio_files(source_id, meta.get("audio_path"))
+
+        # 6. Mark Ready
         Storage.update_source_status(source_id, status="ready", progress=100.0)
-        logger.info(f"Source {source_id} ({meta['title']}) processed & topic-indexed successfully!")
+        logger.info(f"Source {source_id} ({meta['title']}) processed, indexed & audio cleaned up!")
 
     except Exception as e:
         logger.error(f"Failed processing source {source_id}: {e}", exc_info=True)

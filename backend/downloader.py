@@ -213,6 +213,28 @@ class YouTubeDownloader:
         raise RuntimeError(f"All yt-dlp client attempts failed: {last_err}")
 
     @staticmethod
+    def cleanup_audio_files(source_id: str, audio_path: Optional[str] = None):
+        """
+        Deletes temporary audio files and chunk parts from disk after transcription & indexing.
+        """
+        try:
+            if audio_path and os.path.exists(audio_path):
+                os.remove(audio_path)
+                logger.info(f"🗑️ Deleted audio file: {audio_path}")
+
+            # Also delete any chunk files matching source_id or filename
+            if audio_path:
+                base_stem = Path(audio_path).stem
+                for f in os.listdir(DOWNLOADS_DIR):
+                    if (base_stem in f or source_id in f) and f.endswith(".mp3"):
+                        target = DOWNLOADS_DIR / f
+                        if target.exists():
+                            os.remove(target)
+                            logger.info(f"🗑️ Deleted chunk file: {target}")
+        except Exception as e:
+            logger.warning(f"Error during audio cleanup: {e}")
+
+    @staticmethod
     def chunk_audio_if_needed(audio_path: str, max_size_mb: float = 23.0) -> List[Tuple[str, float]]:
         """
         Checks if audio file exceeds max_size_mb (Groq Whisper limit is 25MB).
