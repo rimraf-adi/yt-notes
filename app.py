@@ -240,13 +240,15 @@ with st.sidebar:
         label_visibility="collapsed"
     )
     
-    def process_source_pipeline(src, current_notebook_id):
+    def process_source_pipeline(src, current_notebook_id, status_placeholder=None):
         """Processes a single source: checks cache -> download -> whisper -> topic index -> cleanup."""
         vid_id = src.get("video_id", "") or YouTubeDownloader.extract_video_id(src.get("url", ""))
 
         # ⚡ 1. Check if video was previously transcribed (Zero-Download Cache Hit)
         cached_trans = Storage.get_transcript_by_video_id(vid_id)
         if cached_trans:
+            if status_placeholder:
+                status_placeholder.caption(f"⚡ Reusing cached transcript for {src.get('title', 'video')[:30]}...")
             logger.info(f"⚡ [Cache Hit] Reusing transcript for {vid_id} without downloading!")
             Storage.save_transcript(src["id"], cached_trans["full_text"], cached_trans["segments"])
             
@@ -268,6 +270,8 @@ with st.sidebar:
             return
 
         # 2. Download audio if not in transcript cache
+        if status_placeholder:
+            status_placeholder.caption(f"📥 Downloading audio for {src.get('title', 'video')[:30]}...")
         def update_dl_pct(p, msg):
             pass
         meta = YouTubeDownloader.download_audio(src["url"], src["id"], progress_callback=update_dl_pct)
@@ -285,12 +289,16 @@ with st.sidebar:
         )
 
         # 3. Transcribe with Whisper Large
+        if status_placeholder:
+            status_placeholder.caption(f"🎙️ Transcribing with Groq Whisper: {meta.get('title', 'video')[:30]}...")
         Transcriber.process_source_audio(
             source_id=src["id"],
             audio_path=meta["audio_path"]
         )
 
         # 4. Topic Index
+        if status_placeholder:
+            status_placeholder.caption(f"🧠 Indexing topics: {meta.get('title', 'video')[:30]}...")
         try:
             TopicIndexer.index_source_topics(src["id"])
         except Exception as te:
@@ -324,14 +332,15 @@ with st.sidebar:
                         registered.append(src)
 
                     # Process each source
-                    prog_bar = st.progress(0, text="Starting ingestion pipeline...")
+                    prog_box = st.empty()
+                    prog_bar = st.progress(0)
                     for idx, src in enumerate(registered):
                         src_title = src.get("title", "Video")
-                        prog_bar.progress(int((idx / len(registered)) * 100), text=f"Processing ({idx+1}/{len(registered)}): {src_title[:30]}...")
-                        process_source_pipeline(src, notebook_id)
+                        prog_bar.progress(int((idx / len(registered)) * 100))
+                        process_source_pipeline(src, notebook_id, status_placeholder=prog_box)
 
-                    prog_bar.progress(100, text="✅ All videos ingested and indexed!")
-                    time.sleep(1)
+                    prog_bar.progress(100)
+                    prog_box.success("✅ Ingestion complete!")
                     st.rerun()
                 except Exception as ex:
                     st.error(f"Ingestion error: {ex}")
@@ -350,18 +359,20 @@ with st.sidebar:
     # Resume Ingestion button if any pending/queued sources exist
     if queued_sources:
         if st.button(f"▶ Resume Ingestion ({len(queued_sources)} Queued)", type="primary", use_container_width=True):
-            prog_bar = st.progress(0, text="Resuming ingestion...")
+            status_box = st.empty()
+            prog_bar = st.progress(0)
             for idx, q_src in enumerate(queued_sources):
                 src_title = q_src.get("title", "Video")
-                prog_bar.progress(int((idx / len(queued_sources)) * 100), text=f"Processing ({idx+1}/{len(queued_sources)}): {src_title[:30]}...")
+                pct = int(((idx) / len(queued_sources)) * 100)
+                prog_bar.progress(pct)
                 try:
-                    process_source_pipeline(q_src, notebook_id)
+                    process_source_pipeline(q_src, notebook_id, status_placeholder=status_box)
                 except Exception as q_err:
                     logger.error(f"Error processing {q_src['id']}: {q_err}")
                     Storage.update_source_status(q_src["id"], status="error", error_message=str(q_err))
 
-            prog_bar.progress(100, text="✅ Ingestion completed!")
-            time.sleep(1)
+            prog_bar.progress(100)
+            status_box.success("✅ Ingestion complete!")
             st.rerun()
     
     if not sources:
