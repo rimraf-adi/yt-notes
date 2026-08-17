@@ -9,18 +9,20 @@ from backend.config import GROQ_KEYS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("GroqRouter")
 
-# Model Definitions by Tier for Max Throughput
+# Model Definitions by Tier for Max Throughput (131k Context Window)
 TIER_HEAVY = [
     "openai/gpt-oss-120b",
     "qwen/qwen3.6-27b",
     "groq/compound",
-    "openai/gpt-oss-20b"
+    "openai/gpt-oss-20b",
+    "groq/compound-mini"
 ]
 
 TIER_FAST = [
     "openai/gpt-oss-20b",
     "groq/compound-mini",
     "qwen/qwen3.6-27b",
+    "groq/compound",
     "openai/gpt-oss-120b"
 ]
 
