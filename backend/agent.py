@@ -59,143 +59,18 @@ class NotebookAgent:
         """
         Generates in-depth, dedicated lecture notes, LaTeX, and PDF specifically for ONE video source.
         """
-        source = Storage.get_source(source_id)
-        if not source:
-            raise ValueError("Source video not found.")
-
-        t = Storage.get_transcript(source_id)
-        if not t or not t.get("segments"):
-            raise ValueError("Transcript not ready for this source.")
-
-        segments = t.get("segments", [])
-        seg_lines = [f"[{s.get('timestamp_str', '00:00')}] {s['text']}" for s in segments]
-        full_transcript = "\n".join(seg_lines)
-
-        system_prompt = (
-            "You are an elite professor writing definitive lecture notes for a single class.\n"
-            f"Lecture Title: {source['title']}\n"
-            f"Channel: {source.get('channel', 'YouTube')} | Duration: {int(source.get('duration', 0))}s\n\n"
-            "Format requirements:\n"
-            f"1. # {source['title']} - Detailed Lecture Notes\n"
-            "2. > Executive Summary: 3-4 sentence core thesis and high-yield takeaway\n"
-            "3. ## Deep-Dive Topic Breakdowns: Numbered conceptual sections explaining theories, algorithms, math equations ($$...$$), workflows, or code\n"
-            "4. > Key Takeaways: Blockquote summary of essential exam/practical points\n"
-            "5. ## Chronological Timestamp Guide: Key moments with exact [HH:MM:SS] timestamps\n"
-            "Produce comprehensive, rigorous notes with zero fluff."
-        )
-
-        user_prompt = f"Transcript with timestamps:\n\n{full_transcript[:25000]}\n\nPlease write the complete lecture notes."
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-
-        md_content = groq_router.route_chat(messages, tier="heavy", temperature=0.2, max_tokens=4096)
-        title = f"Lecture Notes: {source['title'][:40]}"
-
-        tex_path = NoteExporter.markdown_to_latex(title, source.get("channel", "YouTube Instructor"), md_content)
-        pdf_path = NoteExporter.markdown_to_pdf(title, source.get("channel", "YouTube Instructor"), md_content)
-
-        artifact = Storage.save_artifact(
-            notebook_id=notebook_id,
-            source_id=source_id,
-            title=title,
-            type="lecture_note",
-            content_md=md_content,
-            content_tex=open(tex_path).read(),
-            pdf_path=pdf_path,
-            metadata={"source_title": source["title"], "source_id": source_id}
-        )
-        return artifact
+        from backend.parallel_synthesizer import ParallelSynthesizer
+        return ParallelSynthesizer.synthesize_single_lecture(notebook_id, source_id)
 
     @staticmethod
     def generate_master_course_booklet(notebook_id: str) -> Dict[str, Any]:
         """
-        Generates a unified master course textbook/booklet concatenating & synthesizing
-        all playlist lectures into a single unified Markdown, LaTeX, and compiled PDF.
-        Uses the 8 Groq keys in parallel for ultra-fast chapter generation!
+        Generates a unified master course textbook/booklet synthesizing
+        all playlist lectures into a single unified Markdown, LaTeX, and compiled PDF
+        using the 8 Groq keys in parallel with deep academic synthesis.
         """
-        nb = Storage.get_notebook(notebook_id)
-        nb_title = nb["title"] if nb else "Complete Course Master Textbook"
-        sources = Storage.get_sources_for_notebook(notebook_id)
-        ready_sources = [s for s in sources if s.get("status") == "ready"]
-
-        if not ready_sources:
-            raise ValueError("No ready video sources found in this notebook/playlist.")
-
-        logger.info(f"Generating Master Course Booklet across {len(ready_sources)} lectures in parallel...")
-
-        # Helper to synthesize a single chapter in parallel via Groq router
-        def synthesize_chapter(index_and_source: Tuple[int, Dict[str, Any]]) -> Tuple[int, str]:
-            idx, src = index_and_source
-            t = Storage.get_transcript(src["id"])
-            segments = t.get("segments", []) if t else []
-            sample_text = "\n".join([f"[{s.get('timestamp_str', '00:00')}] {s['text']}" for s in segments[:120]])
-
-            sys_prompt = (
-                f"You are a textbook author writing Chapter {idx + 1} of a master textbook.\n"
-                f"Chapter Title: {src['title']}\n"
-                "Format in Markdown:\n"
-                f"## Chapter {idx + 1}: {src['title']}\n"
-                "> Chapter Overview: High-level overview\n"
-                "### Core Principles & Technical Mechanics: Detailed analysis with formulas and examples\n"
-                "> Key Takeaways: 2-3 bullet summary\n"
-            )
-            msgs = [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Transcript:\n{sample_text}\n\nWrite Chapter {idx + 1}."}
-            ]
-            chapter_text = groq_router.route_chat(msgs, tier="heavy", temperature=0.2, max_tokens=3000)
-            return idx, chapter_text
-
-        # Execute chapter synthesis concurrently across all 8 Groq keys
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            chapter_results = list(executor.map(synthesize_chapter, enumerate(ready_sources)))
-
-        # Sort chapters in original lecture order
-        chapter_results.sort(key=lambda x: x[0])
-        chapters_md = [c[1] for c in chapter_results]
-
-        # Generate Master Syllabus Overview
-        overview_prompt = [
-            {"role": "system", "content": f"You are the lead author of the master textbook '{nb_title}'. Write an inspiring course preface, syllabus map, and cross-lecture concept relationship matrix."},
-            {"role": "user", "content": f"Lectures in course:\n" + "\n".join([f"- Lecture {i+1}: {s['title']}" for i, s in enumerate(ready_sources)])}
-        ]
-        preface_md = groq_router.route_chat(overview_prompt, tier="heavy", temperature=0.3, max_tokens=2000)
-
-        # Assemble Full Master Textbook
-        book_lines = [
-            f"# {nb_title} - Master Course Textbook",
-            f"> **Comprehensive Unified Course Notes & Knowledge Base**",
-            f"> *Total Lectures Ingested: {len(ready_sources)} | Generated by YouTube NotebookLM*",
-            "",
-            "---",
-            "",
-            preface_md,
-            "",
-            "---",
-            ""
-        ]
-        book_lines.extend(chapters_md)
-
-        full_book_md = "\n\n".join(book_lines)
-        book_title = f"{nb_title} - Master Course Textbook"
-
-        tex_path = NoteExporter.markdown_to_latex(book_title, "YouTube NotebookLM Master Series", full_book_md)
-        pdf_path = NoteExporter.markdown_to_pdf(book_title, "YouTube NotebookLM Master Series", full_book_md)
-
-        artifact = Storage.save_artifact(
-            notebook_id=notebook_id,
-            title=book_title,
-            type="master_booklet",
-            content_md=full_book_md,
-            content_tex=open(tex_path).read(),
-            pdf_path=pdf_path,
-            metadata={"total_lectures": len(ready_sources), "scope": "full_course"}
-        )
-
-        return artifact
+        from backend.parallel_synthesizer import ParallelSynthesizer
+        return ParallelSynthesizer.synthesize_master_booklet(notebook_id)
 
     @staticmethod
     def generate_comprehensive_notes(notebook_id: str, source_id: Optional[str] = None) -> Dict[str, Any]:

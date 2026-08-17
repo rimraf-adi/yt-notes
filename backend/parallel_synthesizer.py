@@ -91,17 +91,15 @@ class ParallelSynthesizer:
             # Pull exact transcript spans for matched topics
             relevant_spans = []
             for t in all_topics:
-                # Match topic title or keywords
                 is_match = any(tt.lower() in t["title"].lower() or t["title"].lower() in tt.lower() for tt in target_topics)
                 if is_match or len(target_topics) == 0:
                     span_text = TopicIndexer.get_topic_transcript_span(t["source_id"], t["start_seconds"], t["end_seconds"])
                     if span_text:
                         relevant_spans.append(
-                            f"--- Source: {t['source_title']} [{t['start_time']} - {t['end_time']}] ---\n{span_text}"
+                            f"--- Source: {t['source_title']} ({t.get('channel', 'Lecturer')}) [{t['start_time']} - {t['end_time']}] ---\n{span_text}"
                         )
 
             if not relevant_spans and ready_sources:
-                # Fallback to source transcript
                 src = ready_sources[(ch_num - 1) % len(ready_sources)]
                 t = Storage.get_transcript(src["id"])
                 if t and t.get("segments"):
@@ -112,24 +110,31 @@ class ParallelSynthesizer:
                 context_blob = context_blob[:6000] + "\n...[transcript excerpt]"
 
             sys_prompt = (
-                f"You are writing Chapter {ch_num} of the academic master textbook '{nb_title}'.\n"
-                f"Chapter Title: {ch_title}\n"
-                f"Focus: {focus}\n\n"
-                "Requirements:\n"
-                f"1. ## Chapter {ch_num}: {ch_title}\n"
-                "2. > Chapter Overview: 2-3 sentence high-impact summary\n"
-                "3. ### Deep-Dive Technical Breakdowns: Detailed conceptual, algorithmic, and mathematical explanations ($$...$$ or code blocks)\n"
-                "4. > Key Takeaways: Bullet points of core formulas/rules\n"
-                "5. Include exact timestamp references [HH:MM:SS] cited from the transcripts.\n"
-                "Write in rigorous, publication-grade academic style with zero fluff."
+                f"You are a distinguished research scholar and lead academic author.\n"
+                f"You are synthesizing Chapter {ch_num} of the definitive master volume for '{nb_title}'.\n"
+                f"Chapter Focus: {ch_title} | Specific Themes: {focus}\n\n"
+                "CRITICAL INSTRUCTIONS:\n"
+                "- Do NOT copy-paste raw conversational dialogue or spoken filler.\n"
+                "- Synthesize the actual claims and arguments into structured, rigorous analytical prose.\n"
+                "- Formalize philosophical arguments, theorems, equations, or algorithms into clear premises, conclusions, and counter-arguments.\n"
+                "- Detail core thought experiments, objections, and conceptual distinctions.\n"
+                "- Include exact timestamp citations [HH:MM:SS] referencing the specific lecture moments.\n\n"
+                "CHAPTER STRUCTURE:\n"
+                f"## Chapter {ch_num}: {ch_title}\n"
+                "> Executive Summary: 3-4 sentence distillation of core theses and key philosophical/technical stakes.\n"
+                "### 1. Conceptual Framework & Definitions\n"
+                "### 2. Deep-Dive Analytical Breakdown (Theorems, Formal Arguments, Thought Experiments)\n"
+                "### 3. Objections, Edge Cases & Critical Counter-Arguments\n"
+                "### 4. Timestamped Evidence & Milestone Guide\n"
+                "> Key Takeaways: Bulleted summary of foundational takeaways and principles."
             )
 
             msgs = [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Transcript Evidence:\n\n{context_blob}\n\nWrite Chapter {ch_num} now."}
+                {"role": "user", "content": f"Primary Source Evidence:\n\n{context_blob}\n\nSynthesize Chapter {ch_num} now."}
             ]
 
-            logger.info(f"🚀 [Parallel Synthesizer] Key worker dispatching Chapter {ch_num}: '{ch_title}'")
+            logger.info(f"🚀 [Parallel Synthesizer] Key worker synthesizing Chapter {ch_num}: '{ch_title}'")
             chapter_md = groq_router.route_chat(msgs, tier="heavy", temperature=0.2, max_tokens=2500)
             return ch_num, chapter_md
 
@@ -140,12 +145,33 @@ class ParallelSynthesizer:
         rendered_chapters.sort(key=lambda x: x[0])
         chapters_content = [c[1] for c in rendered_chapters]
 
-        # 4. Generate Master Preface & Syllabus Matrix
+        # 4. Generate Grounded Master Preface & Concept Taxonomy
+        topics_summary = "\n".join([f"- {t['title']} (from '{t['source_title']}'): {t['summary']}" for t in all_topics[:25]])
+        channels_str = ", ".join(list(set(s.get("channel", "Academic Lecture Series") for s in ready_sources)))
+        
         preface_prompt = [
-            {"role": "system", "content": f"Write an academic preface, course syllabus overview, and concept roadmap for the master textbook '{nb_title}'."},
-            {"role": "user", "content": f"Lectures Included:\n" + "\n".join([f"- {s['title']}" for s in ready_sources])}
+            {
+                "role": "system",
+                "content": (
+                    f"You are the senior academic editor writing the Preface and Conceptual Architecture for the master volume '{nb_title}'.\n"
+                    f"Lectures were delivered by: {channels_str}.\n"
+                    "CRITICAL: Base the preface strictly on the real subject matter of the ingested lectures. Do NOT invent fictional professors or unrelated topics.\n\n"
+                    "Structure:\n"
+                    "## Preface & Methodological Framework\n"
+                    "- Scope and Intellectual Objectives of this compendium.\n"
+                    "- Methodological approach (Conceptual analysis, analytical rigor, grounded timestamp citations).\n"
+                    "## Master Curriculum & Concept Taxonomy\n"
+                    "Markdown table detailing: Section | Central Inquiries | Methodological Tools | Primary Lectures.\n"
+                    "## Interdisciplinary Map & Knowledge Graph\n"
+                    "Summary of how the core concepts interconnect across the entire series."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"Ingested Course Lectures:\n" + "\n".join([f"• {s['title']} ({s.get('channel', 'Course')})" for s in ready_sources]) + f"\n\nKey Concepts Covered:\n{topics_summary}"
+            }
         ]
-        preface_md = groq_router.route_chat(preface_prompt, tier="heavy", temperature=0.3, max_tokens=1800)
+        preface_md = groq_router.route_chat(preface_prompt, tier="heavy", temperature=0.2, max_tokens=1800)
 
         # 5. Assemble Master Document
         master_doc_lines = [
