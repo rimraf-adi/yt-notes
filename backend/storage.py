@@ -141,6 +141,41 @@ class Storage:
         return dict(row) if row else None
 
     @staticmethod
+    def update_notebook(notebook_id: str, title: Optional[str] = None, description: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        conn = get_db()
+        cursor = conn.cursor()
+        now = time.time()
+        updates = ["updated_at = ?"]
+        params = [now]
+        if title is not None:
+            updates.append("title = ?")
+            params.append(title.strip())
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description.strip())
+        params.append(notebook_id)
+        cursor.execute(f"UPDATE notebooks SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        conn.commit()
+        conn.close()
+        return Storage.get_notebook(notebook_id)
+
+    @staticmethod
+    def rename_notebook(notebook_id: str, new_title: str) -> Optional[Dict[str, Any]]:
+        return Storage.update_notebook(notebook_id, title=new_title)
+
+    @staticmethod
+    def delete_notebook(notebook_id: str):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM notebooks WHERE id = ?", (notebook_id,))
+        cursor.execute("DELETE FROM sources WHERE notebook_id = ?", (notebook_id,))
+        cursor.execute("DELETE FROM chat_messages WHERE notebook_id = ?", (notebook_id,))
+        cursor.execute("DELETE FROM studio_artifacts WHERE notebook_id = ?", (notebook_id,))
+        cursor.execute("DELETE FROM topic_index WHERE notebook_id = ?", (notebook_id,))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
     def get_or_create_default_notebook() -> Dict[str, Any]:
         notebooks = Storage.get_notebooks()
         if notebooks:

@@ -24,7 +24,12 @@ def test_storage_notebook_crud():
     nb_id = nb["id"]
     assert nb["title"] == "Test Algorithms Class"
 
-    # 2. List Notebooks
+    # Test Rename Notebook
+    updated_nb = Storage.rename_notebook(nb_id, "Advanced Graph Theory 101")
+    assert updated_nb is not None
+    assert updated_nb["title"] == "Advanced Graph Theory 101"
+
+    # 2. Get / List Notebooks
     notebooks = Storage.list_notebooks()
     assert len(notebooks) > 0
     assert any(n["id"] == nb_id for n in notebooks)

@@ -59,11 +59,15 @@ with st.sidebar:
     st.markdown(":green-background[⚡ 8-Key Groq Rotation Active]")
     st.divider()
 
-    # Notebook Switcher / Creator
-    col_nb1, col_nb2 = st.columns([3, 1])
+    # Notebook Switcher / Rename / Creator
+    col_nb1, col_nb2, col_nb3 = st.columns([3, 1, 1])
     with col_nb1:
         st.subheader(f"📓 {st.session_state.get('notebook_title', 'Notebook')}")
     with col_nb2:
+        if st.button("✏️", help="Rename this notebook"):
+            st.session_state.is_renaming_nb = not st.session_state.get("is_renaming_nb", False)
+            st.rerun()
+    with col_nb3:
         if st.button("➕", help="Create new clean notebook"):
             now_str = datetime.now().strftime("%I:%M %p")
             new_nb = Storage.create_notebook(f"Study Notebook ({now_str})")
@@ -71,8 +75,30 @@ with st.sidebar:
             st.session_state.notebook_title = new_nb["title"]
             st.session_state.chat_history = []
             st.session_state.current_artifact = None
+            st.session_state.is_renaming_nb = False
             st.query_params["notebook_id"] = new_nb["id"]
             st.rerun()
+
+    # Explicit Rename Input Box if active
+    if st.session_state.get("is_renaming_nb", False):
+        with st.container():
+            new_nb_name = st.text_input(
+                "Edit Notebook Name",
+                value=st.session_state.get("notebook_title", "Notebook"),
+                key="rename_nb_field"
+            )
+            col_save, col_cancel = st.columns(2)
+            with col_save:
+                if st.button("💾 Save", use_container_width=True):
+                    if new_nb_name.strip():
+                        Storage.rename_notebook(notebook_id, new_nb_name.strip())
+                        st.session_state.notebook_title = new_nb_name.strip()
+                    st.session_state.is_renaming_nb = False
+                    st.rerun()
+            with col_cancel:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.is_renaming_nb = False
+                    st.rerun()
 
     all_notebooks = Storage.list_notebooks()
     if len(all_notebooks) > 1:
@@ -91,6 +117,7 @@ with st.sidebar:
             st.session_state.chat_history = Storage.get_chat_history(selected_nb_id)
             artifacts = Storage.get_notebook_artifacts(selected_nb_id)
             st.session_state.current_artifact = artifacts[0] if artifacts else None
+            st.session_state.is_renaming_nb = False
             st.query_params["notebook_id"] = selected_nb_id
             st.rerun()
 
