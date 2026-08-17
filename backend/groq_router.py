@@ -13,13 +13,15 @@ logger = logging.getLogger("GroqRouter")
 TIER_HEAVY = [
     "openai/gpt-oss-120b",
     "qwen/qwen3.6-27b",
-    "groq/compound"
+    "groq/compound",
+    "openai/gpt-oss-20b"
 ]
 
 TIER_FAST = [
     "openai/gpt-oss-20b",
     "groq/compound-mini",
-    "qwen/qwen3.6-27b"
+    "qwen/qwen3.6-27b",
+    "openai/gpt-oss-120b"
 ]
 
 TIER_AUDIO = [
@@ -35,7 +37,8 @@ class KeyModelSlot:
         self.key_idx = key_idx
         self.api_key = api_key
         self.model = model
-        self.client = Groq(api_key=api_key)
+        # Disable internal SDK sleeping so our router switches keys/models instantly
+        self.client = Groq(api_key=api_key, max_retries=0, timeout=30.0)
         
         self.cooldown_until = 0.0
         self.inflight_requests = 0
@@ -49,7 +52,7 @@ class KeyModelSlot:
     def is_available(self) -> bool:
         return time.time() >= self.cooldown_until
 
-    def mark_error(self, cooldown_duration: float = 60.0):
+    def mark_error(self, cooldown_duration: float = 20.0):
         self.cooldown_until = time.time() + cooldown_duration
         self.total_errors += 1
         logger.warning(
