@@ -107,7 +107,9 @@ class ParallelSynthesizer:
                 if t and t.get("segments"):
                     relevant_spans.append("\n".join([f"[{s.get('timestamp_str', '00:00')}] {s['text']}" for s in t["segments"][:100]]))
 
-            context_blob = "\n\n".join(relevant_spans[:4])
+            context_blob = "\n\n".join(relevant_spans[:3])
+            if len(context_blob) > 6000:
+                context_blob = context_blob[:6000] + "\n...[transcript excerpt]"
 
             sys_prompt = (
                 f"You are writing Chapter {ch_num} of the academic master textbook '{nb_title}'.\n"
@@ -124,11 +126,11 @@ class ParallelSynthesizer:
 
             msgs = [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Transcript Evidence:\n\n{context_blob[:20000]}\n\nWrite Chapter {ch_num} now."}
+                {"role": "user", "content": f"Transcript Evidence:\n\n{context_blob}\n\nWrite Chapter {ch_num} now."}
             ]
 
             logger.info(f"🚀 [Parallel Synthesizer] Key worker dispatching Chapter {ch_num}: '{ch_title}'")
-            chapter_md = groq_router.route_chat(msgs, tier="heavy", temperature=0.2, max_tokens=3500)
+            chapter_md = groq_router.route_chat(msgs, tier="heavy", temperature=0.2, max_tokens=2500)
             return ch_num, chapter_md
 
         # Execute all sections concurrently across 8 Groq keys
@@ -219,13 +221,13 @@ class ParallelSynthesizer:
             "Produce comprehensive, rigorous notes with zero fluff."
         )
 
-        user_prompt = f"Transcript with timestamps:\n\n{transcript_text[:25000]}\n\nWrite the complete lecture notes."
+        user_prompt = f"Transcript with timestamps:\n\n{transcript_text[:8000]}\n\nWrite the complete lecture notes."
 
         md_content = groq_router.route_chat(
             [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             tier="heavy",
             temperature=0.2,
-            max_tokens=4096
+            max_tokens=2500
         )
 
         title = f"Lecture Notes: {source['title'][:40]}"

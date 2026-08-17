@@ -191,6 +191,11 @@ class GroqKeyModelRouter:
                     with self.lock:
                         slot.inflight_requests = max(0, slot.inflight_requests - 1)
                         slot.mark_error(cooldown_duration=20.0)
+                    # If payload too large (413), truncate messages for subsequent retries
+                    if "413" in str(e) or "Payload Too Large" in str(e) or "too large" in str(e).lower():
+                        for msg in messages:
+                            if len(msg.get("content", "")) > 4000:
+                                msg["content"] = msg["content"][:4000] + "\n...[content trimmed for payload size]"
                     last_error = e
                 except Exception as e:
                     with self.lock:
