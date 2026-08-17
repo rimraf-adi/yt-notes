@@ -15,12 +15,12 @@ from backend.transcriber import Transcriber
 from backend.agent import NotebookAgent
 from backend.topic_indexer import TopicIndexer
 from backend.parallel_synthesizer import ParallelSynthesizer
-from backend.exporters import Exporter
+from backend.exporters import Exporter, NoteExporter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("yt_notes_streamlit")
 
-# Page Configuration - 100% Native Streamlit (No HTML / No CSS)
+# Page Configuration - Clean Modern Architecture
 st.set_page_config(
     page_title="YouTube NotebookLM",
     page_icon="🎓",
@@ -29,11 +29,9 @@ st.set_page_config(
 )
 
 # ----------------- View State & Persistent Query Params -----------------
-# Determine if we are in Gallery View (Home) or Studio View
 param_nb_id = st.query_params.get("notebook_id")
 all_notebooks = Storage.list_notebooks()
 
-# Default to gallery if user requested gallery or if no query param exists
 if "view_mode" not in st.session_state:
     if param_nb_id and Storage.get_notebook(param_nb_id):
         st.session_state.view_mode = "studio"
@@ -42,27 +40,31 @@ if "view_mode" not in st.session_state:
         st.session_state.view_mode = "gallery"
         st.session_state.notebook_id = None
 
-# If in gallery mode, render the NotebookLM Notebooks Gallery
+# =========================================================================
+# 🏠 1. GALLERY VIEW (Home Dashboard)
+# =========================================================================
 if st.session_state.get("view_mode") == "gallery":
     st.title("🎓 YouTube NotebookLM")
-    st.caption("AI Research Assistant • Grounded RAG • 8-Key Rotating Groq Engine (LLaMA 3.3 70B & DeepSeek R1)")
+    st.caption("Grounded Academic Research Engine • Multi-Key Parallel Groq Matrix • LaTeX & PDF Publishing")
 
-    col_top1, col_top2 = st.columns([3, 1])
-    with col_top1:
-        st.subheader("📚 Your Notebooks")
-    with col_top2:
-        if st.button("➕ Create New Notebook", type="primary", use_container_width=True):
+    # Top Action Bar
+    col_header, col_action = st.columns([3, 1])
+    with col_header:
+        st.subheader("📚 Research Notebooks")
+    with col_action:
+        if st.button("➕ Create New Notebook", type="primary"):
             st.session_state.show_create_modal = True
             st.rerun()
 
+    # Create Modal / Container
     if st.session_state.get("show_create_modal", False):
         with st.container(border=True):
             st.markdown("#### ➕ Create New Notebook")
-            nb_name_input = st.text_input("Notebook Title", placeholder="e.g. Stanford CS229 Machine Learning", key="create_nb_name")
+            nb_name_input = st.text_input("Notebook Title", placeholder="e.g. Yale Philosophy 176 - Death (Shelly Kagan)", key="create_nb_name")
             col_c1, col_c2 = st.columns(2)
             with col_c1:
-                if st.button("Create & Open", type="primary", use_container_width=True):
-                    title = nb_name_input.strip() if nb_name_input.strip() else f"Study Notebook ({datetime.now().strftime('%I:%M %p')})"
+                if st.button("Create & Open", type="primary"):
+                    title = nb_name_input.strip() if nb_name_input.strip() else f"Research Notebook ({datetime.now().strftime('%b %d, %I:%M %p')})"
                     new_nb = Storage.create_notebook(title)
                     st.session_state.notebook_id = new_nb["id"]
                     st.session_state.notebook_title = new_nb["title"]
@@ -71,11 +73,11 @@ if st.session_state.get("view_mode") == "gallery":
                     st.query_params["notebook_id"] = new_nb["id"]
                     st.rerun()
             with col_c2:
-                if st.button("Cancel", use_container_width=True):
+                if st.button("Cancel"):
                     st.session_state.show_create_modal = False
                     st.rerun()
 
-    # Telemetry metrics
+    # Platform Telemetry Metrics
     all_notebooks = Storage.list_notebooks()
     total_sources = sum(len(Storage.get_sources(nb["id"])) for nb in all_notebooks)
     total_artifacts = sum(len(Storage.get_notebook_artifacts(nb["id"])) for nb in all_notebooks)
@@ -83,21 +85,25 @@ if st.session_state.get("view_mode") == "gallery":
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Cached Notebooks", len(all_notebooks))
-    m2.metric("Ingested Videos", total_sources)
-    m3.metric("Studio Artifacts", total_artifacts)
-    m4.metric("Active Groq Keys", f"{matrix_stats.get('total_keys', 8)}/8 Pool")
+    m2.metric("Ingested Lectures", total_sources)
+    m3.metric("Synthesized Compendiums", total_artifacts)
+    m4.metric("Active Groq Keys", f"{matrix_stats.get('total_keys', 8)}/8 Slots Active")
 
     st.divider()
 
     if not all_notebooks:
         st.info("👋 You don't have any notebooks yet. Click **➕ Create New Notebook** above to ingest YouTube videos and generate study notes.")
     else:
-        # Render Notebook Cards in 2 columns
-        for i in range(0, len(all_notebooks), 2):
+        # Search & Filter
+        search_query = st.text_input("Search notebooks...", placeholder="Type to filter notebooks by title...", label_visibility="collapsed")
+        filtered_notebooks = [nb for nb in all_notebooks if search_query.lower() in nb["title"].lower()] if search_query else all_notebooks
+
+        # Grid of Notebook Cards
+        for i in range(0, len(filtered_notebooks), 2):
             row_cols = st.columns(2)
             for j in range(2):
-                if i + j < len(all_notebooks):
-                    nb = all_notebooks[i + j]
+                if i + j < len(filtered_notebooks):
+                    nb = filtered_notebooks[i + j]
                     sources = Storage.get_sources(nb["id"])
                     artifacts = Storage.get_notebook_artifacts(nb["id"])
                     ready_sources = sum(1 for s in sources if s.get("status") == "ready")
@@ -106,7 +112,7 @@ if st.session_state.get("view_mode") == "gallery":
                     with row_cols[j]:
                         with st.container(border=True):
                             st.markdown(f"### 📓 {nb['title']}")
-                            st.caption(f"🕒 Last active: {updated_dt}")
+                            st.caption(f"🕒 Last Active: {updated_dt}")
                             
                             c_info1, c_info2 = st.columns(2)
                             c_info1.markdown(f"🎬 **{len(sources)} Sources** ({ready_sources} Ready)")
@@ -115,7 +121,7 @@ if st.session_state.get("view_mode") == "gallery":
                             st.divider()
                             c_btn1, c_btn2, c_btn3 = st.columns([3, 1, 1])
                             with c_btn1:
-                                if st.button(f"🚀 Open Notebook", key=f"open_{nb['id']}", type="primary", use_container_width=True):
+                                if st.button(f"🚀 Open Notebook", key=f"open_{nb['id']}", type="primary"):
                                     st.session_state.notebook_id = nb["id"]
                                     st.session_state.notebook_title = nb["title"]
                                     st.session_state.view_mode = "studio"
@@ -141,7 +147,9 @@ if st.session_state.get("view_mode") == "gallery":
 
     st.stop()
 
-# ----------------- Studio View -----------------
+# =========================================================================
+# 🎓 2. STUDIO VIEW (Active Workspace)
+# =========================================================================
 active_nb_id = st.session_state.get("notebook_id") or param_nb_id
 active_nb = Storage.get_notebook(active_nb_id) if active_nb_id else None
 
@@ -163,8 +171,7 @@ if "current_artifact" not in st.session_state or st.session_state.current_artifa
 
 # ----------------- Sidebar: Sources & Notebook Manager -----------------
 with st.sidebar:
-    # Home button to return to gallery
-    if st.button("⬅ 🏠 All Notebooks", use_container_width=True):
+    if st.button("⬅ 🏠 All Notebooks"):
         st.session_state.view_mode = "gallery"
         st.session_state.notebook_id = None
         st.query_params.clear()
@@ -172,24 +179,18 @@ with st.sidebar:
 
     st.divider()
     st.title("🎓 YouTube NotebookLM")
-    st.markdown(":green-background[⚡ 8-Key Groq Rotation Active]")
+    st.markdown(":green-background[⚡ 8-Key Groq Matrix Active]")
     st.divider()
 
-    # Notebook Header / Rename / Creator
-    col_nb1, col_nb2, col_nb3 = st.columns([3, 1, 1])
+    # Notebook Header / Rename
+    col_nb1, col_nb2 = st.columns([4, 1])
     with col_nb1:
         st.subheader(f"📓 {st.session_state.get('notebook_title', 'Notebook')}")
     with col_nb2:
         if st.button("✏️", help="Rename this notebook"):
             st.session_state.is_renaming_nb = not st.session_state.get("is_renaming_nb", False)
             st.rerun()
-    with col_nb3:
-        if st.button("➕", help="Create new clean notebook"):
-            st.session_state.show_create_modal = True
-            st.session_state.view_mode = "gallery"
-            st.rerun()
 
-    # Explicit Rename Input Box if active
     if st.session_state.get("is_renaming_nb", False):
         with st.container():
             new_nb_name = st.text_input(
@@ -199,17 +200,18 @@ with st.sidebar:
             )
             col_save, col_cancel = st.columns(2)
             with col_save:
-                if st.button("💾 Save", use_container_width=True):
+                if st.button("💾 Save"):
                     if new_nb_name.strip():
                         Storage.rename_notebook(notebook_id, new_nb_name.strip())
                         st.session_state.notebook_title = new_nb_name.strip()
                     st.session_state.is_renaming_nb = False
                     st.rerun()
             with col_cancel:
-                if st.button("Cancel", use_container_width=True):
+                if st.button("Cancel"):
                     st.session_state.is_renaming_nb = False
                     st.rerun()
 
+    # Notebook Switcher Dropdown
     all_notebooks = Storage.list_notebooks()
     if len(all_notebooks) > 1:
         nb_options = {nb["id"]: nb["title"] for nb in all_notebooks}
@@ -232,7 +234,7 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.subheader("📥 Ingest Videos / Playlists")
+    st.subheader("📥 Ingest Video or Playlist")
     
     url_input = st.text_input(
         "YouTube URL",
@@ -244,15 +246,14 @@ with st.sidebar:
         """Processes a single source: checks cache -> download -> whisper -> topic index -> cleanup."""
         vid_id = src.get("video_id", "") or YouTubeDownloader.extract_video_id(src.get("url", ""))
 
-        # ⚡ 1. Check if video was previously transcribed (Zero-Download Cache Hit)
+        # ⚡ 1. Zero-Download Cache Check
         cached_trans = Storage.get_transcript_by_video_id(vid_id)
         if cached_trans:
             if status_placeholder:
-                status_placeholder.caption(f"⚡ Reusing cached transcript for {src.get('title', 'video')[:30]}...")
+                status_placeholder.caption(f"⚡ Instant Cache Hit: {src.get('title', 'video')[:30]}...")
             logger.info(f"⚡ [Cache Hit] Reusing transcript for {vid_id} without downloading!")
             Storage.save_transcript(src["id"], cached_trans["full_text"], cached_trans["segments"])
             
-            # Copy cached topics
             cached_topics = Storage.get_topic_index_by_video_id(vid_id)
             if cached_topics:
                 for t in cached_topics:
@@ -269,9 +270,9 @@ with st.sidebar:
             )
             return
 
-        # 2. Download audio if not in transcript cache
+        # 2. Audio Download
         if status_placeholder:
-            status_placeholder.caption(f"📥 Downloading audio for {src.get('title', 'video')[:30]}...")
+            status_placeholder.caption(f"📥 Downloading Audio: {src.get('title', 'video')[:30]}...")
         def update_dl_pct(p, msg):
             pass
         meta = YouTubeDownloader.download_audio(src["url"], src["id"], progress_callback=update_dl_pct)
@@ -288,36 +289,35 @@ with st.sidebar:
             chapters=meta["chapters"]
         )
 
-        # 3. Transcribe with Whisper Large
+        # 3. Whisper Large Transcription
         if status_placeholder:
-            status_placeholder.caption(f"🎙️ Transcribing with Groq Whisper: {meta.get('title', 'video')[:30]}...")
+            status_placeholder.caption(f"🎙️ Whisper Transcription: {meta.get('title', 'video')[:30]}...")
         Transcriber.process_source_audio(
             source_id=src["id"],
             audio_path=meta["audio_path"]
         )
 
-        # 4. Topic Index
+        # 4. Topic Indexing
         if status_placeholder:
-            status_placeholder.caption(f"🧠 Indexing topics: {meta.get('title', 'video')[:30]}...")
+            status_placeholder.caption(f"🧠 Indexing Topics: {meta.get('title', 'video')[:30]}...")
         try:
             TopicIndexer.index_source_topics(src["id"])
         except Exception as te:
             logger.warning(f"Topic indexing warning: {te}")
 
-        # 5. Clean up audio files from disk immediately to save space
+        # 5. Audio Cleanup
         YouTubeDownloader.cleanup_audio_files(src["id"], meta.get("audio_path"))
 
-        # 6. Mark ready
+        # 6. Mark Ready
         Storage.update_source_status(src["id"], status="ready", progress=100.0)
 
-    if st.button("🚀 Ingest & Transcribe", use_container_width=True):
+    if st.button("🚀 Ingest & Transcribe"):
         if url_input.strip():
-            with st.spinner("Fetching video / playlist metadata..."):
+            with st.spinner("Discovering playlist and video metadata..."):
                 try:
                     videos = YouTubeDownloader.get_playlist_videos(url_input.strip())
-                    st.info(f"Discovered {len(videos)} video(s). Registering in knowledge base...")
+                    st.info(f"Found {len(videos)} video(s). Ingesting...")
                     
-                    # Pre-register all sources immediately
                     registered = []
                     for v in videos:
                         src = Storage.add_source(
@@ -331,38 +331,34 @@ with st.sidebar:
                         )
                         registered.append(src)
 
-                    # Process each source
                     prog_box = st.empty()
                     prog_bar = st.progress(0)
                     for idx, src in enumerate(registered):
-                        src_title = src.get("title", "Video")
                         prog_bar.progress(int((idx / len(registered)) * 100))
                         process_source_pipeline(src, notebook_id, status_placeholder=prog_box)
 
                     prog_bar.progress(100)
-                    prog_box.success("✅ Ingestion complete!")
+                    prog_box.success("✅ Ingestion Complete!")
                     st.rerun()
                 except Exception as ex:
-                    st.error(f"Ingestion error: {ex}")
+                    st.error(f"Ingestion Error: {ex}")
         else:
             st.warning("Please enter a valid YouTube URL.")
 
     st.divider()
     
-    # List Sources
+    # Sources List
     sources = Storage.get_sources(notebook_id)
     ready_count = len([s for s in sources if s.get("status") == "ready"])
     queued_sources = [s for s in sources if s.get("status") != "ready"]
     
     st.subheader(f"📚 Sources ({ready_count}/{len(sources)} Ready)")
 
-    # Resume Ingestion button if any pending/queued sources exist
     if queued_sources:
-        if st.button(f"▶ Resume Ingestion ({len(queued_sources)} Queued)", type="primary", use_container_width=True):
+        if st.button(f"▶ Resume Ingestion ({len(queued_sources)} Queued)", type="primary"):
             status_box = st.empty()
             prog_bar = st.progress(0)
             for idx, q_src in enumerate(queued_sources):
-                src_title = q_src.get("title", "Video")
                 pct = int(((idx) / len(queued_sources)) * 100)
                 prog_bar.progress(pct)
                 try:
@@ -372,7 +368,7 @@ with st.sidebar:
                     Storage.update_source_status(q_src["id"], status="error", error_message=str(q_err))
 
             prog_bar.progress(100)
-            status_box.success("✅ Ingestion complete!")
+            status_box.success("✅ Ingestion Complete!")
             st.rerun()
     
     if not sources:
@@ -385,8 +381,8 @@ with st.sidebar:
             dur_str = f"{dur_min}m {dur_sec}s" if s.get("duration") else ""
             status = s.get("status", "pending")
             
-            with st.expander(f"🎬 {s.get('title', 'Video')[:30]}...", expanded=False):
-                st.image(thumb, use_container_width=True)
+            with st.expander(f"🎬 {s.get('title', 'Video')[:28]}...", expanded=False):
+                st.image(thumb)
                 st.caption(f"Channel: {s.get('channel', 'YouTube')} | Duration: {dur_str}")
                 if status == "ready":
                     st.markdown(":green[✓ Ready]")
@@ -400,51 +396,50 @@ with st.sidebar:
                 col_s1, col_s2 = st.columns(2)
                 with col_s1:
                     if status != "ready":
-                        if st.button("▶ Ingest", key=f"retry_{s['id']}", use_container_width=True):
+                        if st.button("▶ Ingest", key=f"retry_{s['id']}"):
                             with st.spinner("Processing video..."):
                                 process_source_pipeline(s, notebook_id)
                             st.rerun()
                 with col_s2:
-                    if st.button("🗑️ Delete", key=f"del_{s['id']}", use_container_width=True):
+                    if st.button("🗑️ Delete", key=f"del_{s['id']}"):
                         Storage.delete_source(s["id"])
                         st.rerun()
 
-    # 8-Key Monitor in Sidebar
+    # 8-Key Live Monitor
     st.divider()
-    with st.expander("⚡ 8-Key Groq Pool Monitor", expanded=False):
+    with st.expander("⚡ 8-Key Groq Matrix Monitor", expanded=False):
         matrix_stats = groq_router.get_router_matrix_stats()
-        st.caption(f"Total Keys: {matrix_stats.get('total_keys', 8)}")
+        st.caption(f"Active Slots: {matrix_stats.get('total_keys', 8)} Keys • 7 Models")
         for k in matrix_stats.get("key_stats", []):
             st.markdown(f"**Key #{k['key_index']}** `{k['masked_key']}`: 🎙️ {k['transcriptions']} | 💬 {k['completions']}")
 
-# ----------------- Main Screen: Tabs -----------------
-st.title("YouTube NotebookLM")
-st.caption("Grounded Agentic RAG • 8-Key Rotating Groq LLaMA 3.3 70B & DeepSeek R1 • LaTeX & PDF Publishing")
+# ----------------- Main Workspace Tabs -----------------
+st.title(f"📖 {st.session_state.get('notebook_title', 'Research Studio')}")
+st.caption("Grounded Multi-Modal Research Assistant • LaTeX Compendiums • PDF Publishing")
 
 tab_chat, tab_studio, tab_transcripts = st.tabs([
-    "💬 AI Chat & RAG",
+    "💬 AI Chat & Grounded RAG",
     "📚 Studio Notes & Exporters",
-    "🎙️ Transcripts & Topics"
+    "🎙️ Transcripts & Topic Index"
 ])
 
 # ----------------- TAB 1: Grounded RAG Chat -----------------
 with tab_chat:
-    # Display Chat Messages
     chat_history = Storage.get_chat_history(notebook_id)
     
     if not chat_history:
-        st.info("💡 **Welcome to YouTube NotebookLM!** Ask any question across your ingested YouTube lectures and playlists. Every answer is grounded with clickable timestamp citations.")
+        st.info("💡 **Welcome to your Grounded Workspace!** Ask any question across your ingested YouTube lectures. Every answer is substantiated with exact timestamp citations.")
         col_p1, col_p2, col_p3 = st.columns(3)
         with col_p1:
-            if st.button("📌 Executive Summary & Key Takeaways", use_container_width=True):
+            if st.button("📌 Executive Summary & Core Theses"):
                 st.session_state.pending_prompt = "Provide a comprehensive executive summary with key takeaways and principles from all ingested videos."
                 st.rerun()
         with col_p2:
-            if st.button("💻 Extract Formulas & Principles", use_container_width=True):
+            if st.button("💻 Extract Theorems, Formulas & Algorithms"):
                 st.session_state.pending_prompt = "Extract all mathematical formulas, core algorithms, and technical concepts mentioned across the lectures."
                 st.rerun()
         with col_p3:
-            if st.button("❓ 5-Question Active Recall Quiz", use_container_width=True):
+            if st.button("❓ Active Recall Practice Quiz"):
                 st.session_state.pending_prompt = "Generate a 5-question active recall test with solutions based on these video topics."
                 st.rerun()
     else:
@@ -461,15 +456,13 @@ with tab_chat:
 
     # Chat Input
     prompt_val = st.session_state.pop("pending_prompt", None)
-    user_query = st.chat_input("Ask a question about your videos (e.g., 'Explain topic X with timestamps')...") or prompt_val
+    user_query = st.chat_input("Ask a question about your videos (e.g., 'Explain the deprivation account of death with timestamps')...") or prompt_val
 
     if user_query:
-        # Show User Message
         with st.chat_message("user"):
             st.markdown(user_query)
         Storage.add_chat_message(notebook_id, role="user", content=user_query)
 
-        # Stream Assistant Response
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             full_response = ""
@@ -489,15 +482,15 @@ with tab_chat:
             except Exception as e:
                 st.error(f"Error answering query: {e}")
 
-# ----------------- TAB 2: Studio Notes & 4-Way Exporters -----------------
+# ----------------- TAB 2: Studio Notes & Multi-Format Exporters -----------------
 with tab_studio:
     st.subheader("🛠️ Study Studio & Multi-Format Exporters")
-    st.caption("Generate publication-ready academic documents and download as **Markdown**, **Academic LaTeX**, **Compiled PDF**, or **Standalone HTML**.")
+    st.caption("Generate publication-ready academic documents and download as **Compiled PDF**, **Academic LaTeX**, **Markdown**, or **Standalone HTML**.")
 
     col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
     with col_btn1:
-        if st.button("⚡ Master Course Book (.PDF)", use_container_width=True, help="8-Key Parallel Map-Reduce across all playlist lectures"):
-            with st.spinner("Synthesizing Master Course Textbook across all 8 Groq keys in parallel..."):
+        if st.button("⚡ Master Course Book (.PDF)", help="Multi-key parallel map-reduce across all playlist lectures"):
+            with st.spinner("Synthesizing Master Course Textbook across parallel Groq keys..."):
                 try:
                     art = ParallelSynthesizer.synthesize_master_booklet(notebook_id)
                     st.session_state.current_artifact = art
@@ -509,7 +502,7 @@ with tab_studio:
         sources_ready = [s for s in Storage.get_sources(notebook_id) if s.get("status") == "ready"]
         if sources_ready:
             selected_source_for_note = st.selectbox("Select Lecture", options=sources_ready, format_func=lambda x: x["title"], label_visibility="collapsed")
-            if st.button("📝 Single Lecture Note", use_container_width=True):
+            if st.button("📝 Single Lecture Compendium"):
                 with st.spinner(f"Generating Comprehensive Lecture Notes for {selected_source_for_note['title'][:25]}..."):
                     try:
                         art = ParallelSynthesizer.synthesize_single_lecture(notebook_id, selected_source_for_note["id"])
@@ -519,9 +512,9 @@ with tab_studio:
                     except Exception as e:
                         st.error(f"Lecture note generation failed: {e}")
         else:
-            st.button("📝 Single Lecture Note", disabled=True, use_container_width=True)
+            st.button("📝 Single Lecture Compendium", disabled=True)
     with col_btn3:
-        if st.button("🧠 Study Guide & Quiz", use_container_width=True):
+        if st.button("🧠 Study Guide & Active Recall"):
             with st.spinner("Generating active recall study guide..."):
                 try:
                     art = NotebookAgent.generate_study_guide(notebook_id)
@@ -531,8 +524,8 @@ with tab_studio:
                 except Exception as e:
                     st.error(f"Study guide generation failed: {e}")
     with col_btn4:
-        if st.button("🗺️ Concept Mind Map", use_container_width=True):
-            with st.spinner("Building concept hierarchy..."):
+        if st.button("🗺️ Concept Mind Map"):
+            with st.spinner("Building concept architecture..."):
                 try:
                     art = NotebookAgent.generate_mindmap(notebook_id)
                     st.session_state.current_artifact = art
@@ -543,11 +536,27 @@ with tab_studio:
 
     st.divider()
 
-    # Render Current Artifact & Download Center
+    # Render Current Artifact & History Switcher
     artifacts = Storage.get_notebook_artifacts(notebook_id)
     if artifacts:
-        current_art = st.session_state.get("current_artifact") or artifacts[0]
-        
+        # Artifact History Selector Dropdown
+        col_art_select, col_art_meta = st.columns([3, 1])
+        with col_art_select:
+            art_dict = {a["id"]: a for a in artifacts}
+            current_art_id = st.session_state.get("current_artifact", {}).get("id") if st.session_state.get("current_artifact") else artifacts[0]["id"]
+            selected_art_id = st.selectbox(
+                "Select Generated Document",
+                options=list(art_dict.keys()),
+                format_func=lambda x: f"📄 {art_dict[x].get('title', 'Note')} ({datetime.fromtimestamp(art_dict[x].get('created_at', time.time())).strftime('%b %d • %I:%M %p')})",
+                index=list(art_dict.keys()).index(current_art_id) if current_art_id in art_dict else 0
+            )
+            current_art = art_dict[selected_art_id]
+            st.session_state.current_artifact = current_art
+
+        with col_art_meta:
+            created_dt = datetime.fromtimestamp(current_art.get("created_at", time.time())).strftime("%b %d, %I:%M %p")
+            st.caption(f"Created: {created_dt}")
+
         st.subheader(f"📖 {current_art.get('title', 'Study Document')}")
         
         # 4 Export Download Buttons
@@ -556,29 +565,8 @@ with tab_studio:
 
         exp_col1, exp_col2, exp_col3, exp_col4 = st.columns(4)
         
-        # 1. Markdown
+        # 1. PDF
         with exp_col1:
-            st.download_button(
-                label="📄 Download .MD",
-                data=md_content,
-                file_name=f"{doc_title}.md",
-                mime="text/markdown",
-                use_container_width=True
-            )
-        
-        # 2. Academic LaTeX
-        with exp_col2:
-            latex_content = Exporter.generate_latex(doc_title, md_content)
-            st.download_button(
-                label="📐 Download .TEX (LaTeX)",
-                data=latex_content,
-                file_name=f"{doc_title}.tex",
-                mime="text/x-tex",
-                use_container_width=True
-            )
-
-        # 3. PDF
-        with exp_col3:
             try:
                 pdf_filename = Exporter.generate_pdf(doc_title, md_content)
                 pdf_path = EXPORTS_DIR / pdf_filename
@@ -588,11 +576,29 @@ with tab_studio:
                             label="📕 Download .PDF",
                             data=pf.read(),
                             file_name=pdf_filename,
-                            mime="application/pdf",
-                            use_container_width=True
+                            mime="application/pdf"
                         )
             except Exception as pe:
-                st.caption(f"PDF generation note: {pe}")
+                st.caption(f"PDF generation: {pe}")
+
+        # 2. Academic LaTeX
+        with exp_col2:
+            latex_content = Exporter.generate_latex(doc_title, md_content)
+            st.download_button(
+                label="📐 Download .TEX (LaTeX)",
+                data=latex_content,
+                file_name=f"{doc_title}.tex",
+                mime="text/x-tex"
+            )
+
+        # 3. Markdown
+        with exp_col3:
+            st.download_button(
+                label="📄 Download .MD",
+                data=md_content,
+                file_name=f"{doc_title}.md",
+                mime="text/markdown"
+            )
 
         # 4. Standalone HTML
         with exp_col4:
@@ -601,8 +607,7 @@ with tab_studio:
                 label="🌐 Download .HTML",
                 data=html_content,
                 file_name=f"{doc_title}.html",
-                mime="text/html",
-                use_container_width=True
+                mime="text/html"
             )
 
         st.divider()
@@ -625,25 +630,29 @@ with tab_transcripts:
         )
         
         if selected_source:
-            # 1. Structured Topic Map
-            st.subheader("🗺️ Extracted Topic Boundaries")
-            topics = Storage.get_source_topic_index(selected_source["id"])
-            if topics:
-                for t in topics:
-                    with st.expander(f"📍 {t.get('title', 'Topic')} `[{t.get('start_time_str', '00:00')} - {t.get('end_time_str', '00:00')}]`", expanded=False):
-                        st.markdown(f"**Summary:** {t.get('summary', '')}")
-                        if t.get("key_takeaway"):
-                            st.markdown(f"**Key Takeaway:** {t.get('key_takeaway')}")
-                        if t.get("keywords"):
-                            st.caption(f"Keywords: {', '.join(t.get('keywords', []))}")
-            else:
-                st.caption("Topic indexing in progress or empty for this source.")
+            tab_top, tab_raw = st.tabs(["🗺️ Extracted Topic Architecture", "📜 Full Timestamped Transcript"])
+            
+            with tab_top:
+                topics = Storage.get_source_topic_index(selected_source["id"])
+                if topics:
+                    for t in topics:
+                        with st.expander(f"📍 {t.get('title', 'Topic')} `[{t.get('start_time_str', '00:00')} - {t.get('end_time_str', '00:00')}]`", expanded=False):
+                            st.markdown(f"**Summary:** {t.get('summary', '')}")
+                            if t.get("key_takeaway"):
+                                st.markdown(f"**Key Takeaway:** {t.get('key_takeaway')}")
+                            if t.get("keywords"):
+                                st.caption(f"Keywords: {', '.join(t.get('keywords', []))}")
+                else:
+                    st.caption("Topic indexing in progress or empty for this source.")
 
-            # 2. Raw Timestamped Transcript
-            st.subheader("📜 Full Monotonic Transcript")
-            trans = Storage.get_transcript(selected_source["id"])
-            if trans and trans.get("segments"):
-                for seg in trans["segments"]:
-                    st.markdown(f"**`[{seg.get('timestamp_str', '00:00')}]`** {seg.get('text', '')}")
-            else:
-                st.caption("No transcript segments found.")
+            with tab_raw:
+                trans = Storage.get_transcript(selected_source["id"])
+                if trans and trans.get("segments"):
+                    t_filter = st.text_input("Filter transcript lines...", placeholder="Search keywords across timestamps...", label_visibility="collapsed")
+                    filtered_segs = [s for s in trans["segments"] if t_filter.lower() in s.get("text", "").lower()] if t_filter else trans["segments"]
+                    
+                    with st.container(height=500):
+                        for seg in filtered_segs:
+                            st.markdown(f"**`[{seg.get('timestamp_str', '00:00')}]`** {seg.get('text', '')}")
+                else:
+                    st.caption("No transcript segments found.")
