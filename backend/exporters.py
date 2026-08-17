@@ -29,6 +29,26 @@ class NoteExporter:
         return str(file_path)
 
     @staticmethod
+    def generate_latex(title: str, md_content: str, author: str = "YouTube NotebookLM") -> str:
+        """Generates LaTeX document string."""
+        path = NoteExporter.markdown_to_latex(title, author, md_content)
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    @staticmethod
+    def generate_pdf(title: str, md_content: str, author: str = "YouTube NotebookLM") -> str:
+        """Generates PDF and returns the filename."""
+        path = NoteExporter.markdown_to_pdf(title, author, md_content)
+        return Path(path).name
+
+    @staticmethod
+    def generate_html(title: str, md_content: str, author: str = "YouTube NotebookLM") -> str:
+        """Generates HTML document string."""
+        path = NoteExporter.markdown_to_html(title, author, md_content)
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    @staticmethod
     def markdown_to_latex(title: str, author: str, md_content: str, output_filename: Optional[str] = None) -> str:
         """
         2. Academic LaTeX (.tex) Export
@@ -395,3 +415,7 @@ class NoteExporter:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(full_html)
         return str(file_path)
+
+# Alias for compatibility
+Exporter = NoteExporter
+
