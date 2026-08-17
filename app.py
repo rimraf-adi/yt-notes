@@ -240,6 +240,68 @@ with st.sidebar:
         label_visibility="collapsed"
     )
     
+    def process_source_pipeline(src, current_notebook_id):
+        """Processes a single source: checks cache -> download -> whisper -> topic index -> cleanup."""
+        vid_id = src.get("video_id", "") or YouTubeDownloader.extract_video_id(src.get("url", ""))
+
+        # ⚡ 1. Check if video was previously transcribed (Zero-Download Cache Hit)
+        cached_trans = Storage.get_transcript_by_video_id(vid_id)
+        if cached_trans:
+            logger.info(f"⚡ [Cache Hit] Reusing transcript for {vid_id} without downloading!")
+            Storage.save_transcript(src["id"], cached_trans["full_text"], cached_trans["segments"])
+            
+            # Copy cached topics
+            cached_topics = Storage.get_topic_index_by_video_id(vid_id)
+            if cached_topics:
+                for t in cached_topics:
+                    t["source_id"] = src["id"]
+                Storage.save_topic_index(src["id"], current_notebook_id, cached_topics)
+
+            Storage.update_source_status(
+                src["id"],
+                status="ready",
+                progress=100.0,
+                title=cached_trans.get("title") or src.get("title"),
+                duration=cached_trans.get("duration") or src.get("duration", 0),
+                channel=cached_trans.get("channel") or src.get("channel", "YouTube")
+            )
+            return
+
+        # 2. Download audio if not in transcript cache
+        def update_dl_pct(p, msg):
+            pass
+        meta = YouTubeDownloader.download_audio(src["url"], src["id"], progress_callback=update_dl_pct)
+        Storage.update_source_status(
+            src["id"],
+            status="transcribing",
+            progress=55.0,
+            title=meta["title"],
+            video_id=meta["video_id"],
+            channel=meta["channel"],
+            duration=meta["duration"],
+            thumbnail_url=meta["thumbnail_url"],
+            audio_path=meta["audio_path"],
+            chapters=meta["chapters"]
+        )
+
+        # 3. Transcribe with Whisper Large
+        Transcriber.process_source_audio(
+            source_id=src["id"],
+            audio_path=meta["audio_path"]
+        )
+
+        # 4. Topic Index
+        try:
+            TopicIndexer.index_source_topics(src["id"])
+        except Exception as te:
+            logger.warning(f"Topic indexing warning: {te}")
+
+        # 5. Clean up audio files from disk immediately to save space
+        YouTubeDownloader.cleanup_audio_files(src["id"], meta.get("audio_path"))
+
+        # 6. Mark ready
+        Storage.update_source_status(src["id"], status="ready", progress=100.0)
+
     if st.button("🚀 Ingest & Transcribe", use_container_width=True):
         if url_input.strip():
             with st.spinner("Fetching video / playlist metadata..."):
@@ -253,7 +315,7 @@ with st.sidebar:
                         src = Storage.add_source(
                             notebook_id=notebook_id,
                             url=v["url"],
-                            title=v.get("title", "Processing Video..."),
+                            title=v.get("title", "Loading video..."),
                             video_id=v.get("video_id", ""),
                             channel=v.get("channel", ""),
                             duration=v.get("duration", 0),
@@ -266,66 +328,7 @@ with st.sidebar:
                     for idx, src in enumerate(registered):
                         src_title = src.get("title", "Video")
                         prog_bar.progress(int((idx / len(registered)) * 100), text=f"Processing ({idx+1}/{len(registered)}): {src_title[:30]}...")
-
-                        vid_id = src.get("video_id", "") or YouTubeDownloader.extract_video_id(src.get("url", ""))
-
-                        # ⚡ 1. Check if video was previously transcribed (Zero-Download Cache Hit)
-                        cached_trans = Storage.get_transcript_by_video_id(vid_id)
-                        if cached_trans:
-                            logger.info(f"⚡ [Cache Hit] Reusing transcript for {vid_id} without downloading!")
-                            Storage.save_transcript(src["id"], cached_trans["full_text"], cached_trans["segments"])
-                            
-                            # Copy cached topics
-                            cached_topics = Storage.get_topic_index_by_video_id(vid_id)
-                            if cached_topics:
-                                for t in cached_topics:
-                                    t["source_id"] = src["id"]
-                                Storage.save_topic_index(src["id"], notebook_id, cached_topics)
-
-                            Storage.update_source_status(
-                                src["id"],
-                                status="ready",
-                                progress=100.0,
-                                title=cached_trans.get("title") or src.get("title"),
-                                duration=cached_trans.get("duration") or src.get("duration", 0),
-                                channel=cached_trans.get("channel") or src.get("channel", "YouTube")
-                            )
-                            continue
-
-                        # 2. Download audio if not in transcript cache
-                        def update_dl_pct(p, msg):
-                            pass
-                        meta = YouTubeDownloader.download_audio(src["url"], src["id"], progress_callback=update_dl_pct)
-                        Storage.update_source_status(
-                            src["id"],
-                            status="transcribing",
-                            progress=55.0,
-                            title=meta["title"],
-                            video_id=meta["video_id"],
-                            channel=meta["channel"],
-                            duration=meta["duration"],
-                            thumbnail_url=meta["thumbnail_url"],
-                            audio_path=meta["audio_path"],
-                            chapters=meta["chapters"]
-                        )
-
-                        # 3. Transcribe with Whisper Large
-                        Transcriber.process_source_audio(
-                            source_id=src["id"],
-                            audio_path=meta["audio_path"]
-                        )
-
-                        # 4. Topic Index
-                        try:
-                            TopicIndexer.index_source_topics(src["id"])
-                        except Exception as te:
-                            logger.warning(f"Topic indexing warning: {te}")
-
-                        # 5. Clean up audio files from disk immediately to save space
-                        YouTubeDownloader.cleanup_audio_files(src["id"], meta.get("audio_path"))
-
-                        # 6. Mark ready
-                        Storage.update_source_status(src["id"], status="ready", progress=100.0)
+                        process_source_pipeline(src, notebook_id)
 
                     prog_bar.progress(100, text="✅ All videos ingested and indexed!")
                     time.sleep(1)
@@ -340,7 +343,26 @@ with st.sidebar:
     # List Sources
     sources = Storage.get_sources(notebook_id)
     ready_count = len([s for s in sources if s.get("status") == "ready"])
+    queued_sources = [s for s in sources if s.get("status") != "ready"]
+    
     st.subheader(f"📚 Sources ({ready_count}/{len(sources)} Ready)")
+
+    # Resume Ingestion button if any pending/queued sources exist
+    if queued_sources:
+        if st.button(f"▶ Resume Ingestion ({len(queued_sources)} Queued)", type="primary", use_container_width=True):
+            prog_bar = st.progress(0, text="Resuming ingestion...")
+            for idx, q_src in enumerate(queued_sources):
+                src_title = q_src.get("title", "Video")
+                prog_bar.progress(int((idx / len(queued_sources)) * 100), text=f"Processing ({idx+1}/{len(queued_sources)}): {src_title[:30]}...")
+                try:
+                    process_source_pipeline(q_src, notebook_id)
+                except Exception as q_err:
+                    logger.error(f"Error processing {q_src['id']}: {q_err}")
+                    Storage.update_source_status(q_src["id"], status="error", error_message=str(q_err))
+
+            prog_bar.progress(100, text="✅ Ingestion completed!")
+            time.sleep(1)
+            st.rerun()
     
     if not sources:
         st.caption("No sources yet. Paste a YouTube URL above to begin.")
@@ -364,9 +386,17 @@ with st.sidebar:
                 else:
                     st.caption("Queued")
 
-                if st.button("🗑️ Delete", key=f"del_{s['id']}", use_container_width=True):
-                    Storage.delete_source(s["id"])
-                    st.rerun()
+                col_s1, col_s2 = st.columns(2)
+                with col_s1:
+                    if status != "ready":
+                        if st.button("▶ Ingest", key=f"retry_{s['id']}", use_container_width=True):
+                            with st.spinner("Processing video..."):
+                                process_source_pipeline(s, notebook_id)
+                            st.rerun()
+                with col_s2:
+                    if st.button("🗑️ Delete", key=f"del_{s['id']}", use_container_width=True):
+                        Storage.delete_source(s["id"])
+                        st.rerun()
 
     # 8-Key Monitor in Sidebar
     st.divider()
