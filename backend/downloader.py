@@ -87,8 +87,21 @@ class YouTubeDownloader:
                     progress_callback(50.0, "Audio downloaded. Extracting...")
 
         ydl_opts = {
-            "format": "bestaudio/best",
+            "format": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
             "outtmpl": output_template,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb", "web"],
+                    "player_skip": ["webpage", "configs"],
+                }
+            },
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            "retries": 5,
+            "fragment_retries": 5,
+            "skip_unavailable_fragments": True,
             "postprocessors": [
                 {
                     "key": "FFmpegExtractAudio",
@@ -105,43 +118,58 @@ class YouTubeDownloader:
             "no_warnings": True,
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            video_id = info.get("id", "")
-            title = info.get("title", "YouTube Video")
-            channel = info.get("uploader") or info.get("channel", "Unknown Channel")
-            duration = info.get("duration", 0)
-            thumbnail = info.get("thumbnail") or ""
-            
-            # Extract chapters if available
-            chapters = []
-            if "chapters" in info and info["chapters"]:
-                for ch in info["chapters"]:
-                    chapters.append({
-                        "title": ch.get("title", "Chapter"),
-                        "start_time": ch.get("start_time", 0),
-                        "end_time": ch.get("end_time", 0)
-                    })
+        client_configurations = [
+            ["android", "web"],
+            ["ios"],
+            ["mweb"],
+            ["web_embedded"]
+        ]
 
-            # Locate downloaded mp3 file
-            audio_path = str(DOWNLOADS_DIR / f"{source_id}_{video_id}.mp3")
-            if not os.path.exists(audio_path):
-                # Look for matching file in DOWNLOADS_DIR
-                for f in os.listdir(DOWNLOADS_DIR):
-                    if f.startswith(source_id) and f.endswith(".mp3"):
-                        audio_path = str(DOWNLOADS_DIR / f)
-                        break
+        last_err = None
+        for clients in client_configurations:
+            ydl_opts["extractor_args"]["youtube"]["player_client"] = clients
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    video_id = info.get("id", "")
+                    title = info.get("title", "YouTube Video")
+                    channel = info.get("uploader") or info.get("channel", "Unknown Channel")
+                    duration = info.get("duration", 0)
+                    thumbnail = info.get("thumbnail") or ""
+                    
+                    # Extract chapters if available
+                    chapters = []
+                    if "chapters" in info and info["chapters"]:
+                        for ch in info["chapters"]:
+                            chapters.append({
+                                "title": ch.get("title", "Chapter"),
+                                "start_time": ch.get("start_time", 0),
+                                "end_time": ch.get("end_time", 0)
+                            })
 
-            return {
-                "source_id": source_id,
-                "video_id": video_id,
-                "title": title,
-                "channel": channel,
-                "duration": duration,
-                "thumbnail_url": thumbnail,
-                "audio_path": audio_path,
-                "chapters": chapters
-            }
+                    # Locate downloaded mp3 file
+                    audio_path = str(DOWNLOADS_DIR / f"{source_id}_{video_id}.mp3")
+                    if not os.path.exists(audio_path):
+                        for f in os.listdir(DOWNLOADS_DIR):
+                            if f.startswith(source_id) and f.endswith(".mp3"):
+                                audio_path = str(DOWNLOADS_DIR / f)
+                                break
+
+                    return {
+                        "source_id": source_id,
+                        "video_id": video_id,
+                        "title": title,
+                        "channel": channel,
+                        "duration": duration,
+                        "thumbnail_url": thumbnail,
+                        "audio_path": audio_path,
+                        "chapters": chapters
+                    }
+            except Exception as e:
+                logger.warning(f"Download attempt with client {clients} failed: {e}. Retrying with next client...")
+                last_err = e
+
+        raise RuntimeError(f"All yt-dlp client attempts failed: {last_err}")
 
     @staticmethod
     def chunk_audio_if_needed(audio_path: str, max_size_mb: float = 23.0) -> List[Tuple[str, float]]:
