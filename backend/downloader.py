@@ -69,11 +69,39 @@ class YouTubeDownloader:
             }]
 
     @staticmethod
+    def extract_video_id(url: str) -> str:
+        """Extracts standard YouTube video ID."""
+        match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', url)
+        return match.group(1) if match else "video"
+
+    @staticmethod
     def download_audio(url: str, source_id: str, progress_callback=None) -> Dict[str, Any]:
         """
-        Downloads optimized audio (16kHz mono MP3) and extracts metadata + chapters.
+        Downloads optimized audio (16kHz mono MP3) with disk caching by video_id.
+        If audio was previously downloaded, reuses the cached file instantly.
         """
-        output_template = str(DOWNLOADS_DIR / f"{source_id}_%(id)s.%(ext)s")
+        vid_id = YouTubeDownloader.extract_video_id(url)
+        cached_audio_path = str(DOWNLOADS_DIR / f"{vid_id}.mp3")
+        cached_meta_path = str(DOWNLOADS_DIR / f"{vid_id}_meta.json")
+
+        # 1. Check if cached on disk
+        if os.path.exists(cached_audio_path) and os.path.getsize(cached_audio_path) > 1024:
+            logger.info(f"⚡ [Cache Hit] Reusing downloaded audio for {vid_id} ({cached_audio_path})")
+            if progress_callback:
+                progress_callback(50.0, "Found cached audio on disk...")
+
+            if os.path.exists(cached_meta_path):
+                try:
+                    with open(cached_meta_path, "r", encoding="utf-8") as mf:
+                        cached_meta = json.load(mf)
+                        cached_meta["source_id"] = source_id
+                        cached_meta["audio_path"] = cached_audio_path
+                        return cached_meta
+                except Exception:
+                    pass
+
+        # 2. Download audio if not cached
+        output_template = str(DOWNLOADS_DIR / f"{vid_id}.%(ext)s")
         
         def ydl_progress_hook(d):
             if d.get("status") == "downloading":
@@ -135,7 +163,7 @@ class YouTubeDownloader:
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
-                    video_id = info.get("id", "")
+                    video_id = info.get("id") or vid_id
                     title = info.get("title", "YouTube Video")
                     channel = info.get("uploader") or info.get("channel", "Unknown Channel")
                     duration = info.get("duration", 0)
@@ -152,14 +180,14 @@ class YouTubeDownloader:
                             })
 
                     # Locate downloaded mp3 file
-                    audio_path = str(DOWNLOADS_DIR / f"{source_id}_{video_id}.mp3")
+                    audio_path = str(DOWNLOADS_DIR / f"{video_id}.mp3")
                     if not os.path.exists(audio_path):
                         for f in os.listdir(DOWNLOADS_DIR):
-                            if f.startswith(source_id) and f.endswith(".mp3"):
+                            if f.startswith(video_id) and f.endswith(".mp3"):
                                 audio_path = str(DOWNLOADS_DIR / f)
                                 break
 
-                    return {
+                    meta_dict = {
                         "source_id": source_id,
                         "video_id": video_id,
                         "title": title,
@@ -169,6 +197,15 @@ class YouTubeDownloader:
                         "audio_path": audio_path,
                         "chapters": chapters
                     }
+
+                    # Save metadata cache
+                    try:
+                        with open(cached_meta_path, "w", encoding="utf-8") as mf:
+                            json.dump(meta_dict, mf)
+                    except Exception:
+                        pass
+
+                    return meta_dict
             except Exception as e:
                 logger.warning(f"Download attempt with client {clients} failed: {e}. Retrying with next client...")
                 last_err = e

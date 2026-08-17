@@ -78,7 +78,48 @@ def process_single_video_task(source_id: str, url: str):
             chapters=meta["chapters"]
         )
 
-        # 2. Transcribe audio with 8-key rotating Whisper Large
+        # 2. Check if this video_id was already transcribed in DB (Transcript Cache)
+        conn = Storage.get_transcript(source_id) # check if existing
+        existing_transcript = None
+        
+        # Look for any existing transcript for this video_id across all sources
+        import sqlite3
+        from backend.config import DB_PATH
+        db_conn = sqlite3.connect(str(DB_PATH))
+        db_conn.row_factory = sqlite3.Row
+        cur = db_conn.cursor()
+        cur.execute(
+            """
+            SELECT t.full_text, t.segments_json, s.id as prev_source_id 
+            FROM transcripts t 
+            JOIN sources s ON t.source_id = s.id 
+            WHERE s.video_id = ? AND s.id != ? AND s.status = 'ready'
+            LIMIT 1
+            """,
+            (meta["video_id"], source_id)
+        )
+        cached_row = cur.fetchone()
+        db_conn.close()
+
+        if cached_row:
+            logger.info(f"⚡ [Transcript Cache Hit] Reusing existing transcript for {meta['video_id']}")
+            import json
+            segments = json.loads(cached_row["segments_json"])
+            Storage.save_transcript(source_id, cached_row["full_text"], segments)
+            
+            # Copy topics
+            prev_topics = Storage.get_source_topic_index(cached_row["prev_source_id"])
+            if prev_topics:
+                # Update source_id in topics
+                for t in prev_topics:
+                    t["source_id"] = source_id
+                Storage.save_topic_index(source_id, Storage.get_source(source_id)["notebook_id"], prev_topics)
+            
+            Storage.update_source_status(source_id, status="ready", progress=100.0)
+            logger.info(f"Source {source_id} instantly ready from cache!")
+            return
+
+        # 3. Transcribe audio with 8-key rotating Whisper Large
         def update_transcription_progress(pct: float, msg: str):
             Storage.update_source_status(source_id, status="transcribing", progress=pct)
 
@@ -88,13 +129,13 @@ def process_single_video_task(source_id: str, url: str):
             progress_callback=update_transcription_progress
         )
 
-        # 3. Automatically extract and index topics for precision RAG and parallel synthesis
+        # 4. Automatically extract and index topics for precision RAG and parallel synthesis
         try:
             TopicIndexer.index_source_topics(source_id)
         except Exception as e:
             logger.warning(f"Topic indexing non-fatal error on {source_id}: {e}")
 
-        # 4. Mark Ready
+        # 5. Mark Ready
         Storage.update_source_status(source_id, status="ready", progress=100.0)
         logger.info(f"Source {source_id} ({meta['title']}) processed & topic-indexed successfully!")
 
