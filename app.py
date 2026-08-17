@@ -20,90 +20,16 @@ from backend.exporters import Exporter
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("yt_notes_streamlit")
 
-# Page Configuration
+# Page Configuration - 100% Native Streamlit (No HTML / No CSS)
 st.set_page_config(
-    page_title="YouTube NotebookLM | AI Video Study Studio",
+    page_title="YouTube NotebookLM",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS Styling for sleek dark theme & badges
-st.markdown("""
-<style>
-    /* Dark Theme Accents */
-    .stApp {
-        background-color: #0b0f19;
-        color: #f8fafc;
-    }
-    .css-1d391kg, [data-testid="stSidebar"] {
-        background-color: #111827;
-        border-right: 1px solid #1f2937;
-    }
-    .video-card {
-        background: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 10px;
-        padding: 10px;
-        margin-bottom: 10px;
-        display: flex;
-        gap: 10px;
-        align-items: center;
-    }
-    .video-thumb {
-        width: 80px;
-        height: 50px;
-        border-radius: 6px;
-        object-fit: cover;
-    }
-    .badge-ready {
-        background-color: #065f46;
-        color: #34d399;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 11px;
-        font-weight: 600;
-    }
-    .badge-transcribing {
-        background-color: #1e3a8a;
-        color: #60a5fa;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 11px;
-        font-weight: 600;
-    }
-    .badge-error {
-        background-color: #7f1d1d;
-        color: #f87171;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 11px;
-        font-weight: 600;
-    }
-    .key-badge {
-        display: inline-block;
-        background: rgba(16, 185, 129, 0.15);
-        color: #10b981;
-        border: 1px solid rgba(16, 185, 129, 0.3);
-        padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: 600;
-    }
-    .citation-box {
-        background: #1e293b;
-        border-left: 3px solid #6366f1;
-        padding: 8px 12px;
-        border-radius: 0 6px 6px 0;
-        margin-top: 6px;
-        font-size: 12px;
-        color: #94a3b8;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 # ----------------- Session State Initialization -----------------
-# User directive: on every launch/refresh, initialize a new clean notebook unless explicitly preserved
+# On every launch/refresh, initialize a new clean notebook unless explicitly preserved
 if "notebook_id" not in st.session_state:
     now_str = datetime.now().strftime("%I:%M %p")
     new_nb = Storage.create_notebook(f"Study Notebook ({now_str})")
@@ -116,14 +42,14 @@ notebook_id = st.session_state.notebook_id
 
 # ----------------- Sidebar: Sources & Notebook Manager -----------------
 with st.sidebar:
-    st.markdown("### 🎓 YouTube **NotebookLM**")
-    st.markdown('<span class="key-badge">⚡ 8-Key Groq Rotation Active</span>', unsafe_allow_html=True)
-    st.markdown("---")
+    st.title("🎓 YouTube NotebookLM")
+    st.markdown(":green-background[⚡ 8-Key Groq Rotation Active]")
+    st.divider()
 
     # Notebook Switcher / Creator
     col_nb1, col_nb2 = st.columns([3, 1])
     with col_nb1:
-        st.markdown(f"**📓 {st.session_state.get('notebook_title', 'Notebook')}**")
+        st.subheader(f"📓 {st.session_state.get('notebook_title', 'Notebook')}")
     with col_nb2:
         if st.button("➕", help="Create new clean notebook"):
             now_str = datetime.now().strftime("%I:%M %p")
@@ -152,8 +78,8 @@ with st.sidebar:
             st.session_state.current_artifact = artifacts[0] if artifacts else None
             st.rerun()
 
-    st.markdown("---")
-    st.markdown("#### 📥 Ingest Videos / Playlists")
+    st.divider()
+    st.subheader("📥 Ingest Videos / Playlists")
     
     url_input = st.text_input(
         "YouTube URL",
@@ -234,12 +160,12 @@ with st.sidebar:
         else:
             st.warning("Please enter a valid YouTube URL.")
 
-    st.markdown("---")
+    st.divider()
     
     # List Sources
     sources = Storage.get_sources(notebook_id)
     ready_count = len([s for s in sources if s.get("status") == "ready"])
-    st.markdown(f"#### 📚 Knowledge Sources ({ready_count}/{len(sources)} Ready)")
+    st.subheader(f"📚 Sources ({ready_count}/{len(sources)} Ready)")
     
     if not sources:
         st.caption("No sources yet. Paste a YouTube URL above to begin.")
@@ -251,15 +177,15 @@ with st.sidebar:
             dur_str = f"{dur_min}m {dur_sec}s" if s.get("duration") else ""
             status = s.get("status", "pending")
             
-            with st.expander(f"🎬 {s.get('title', 'Video')[:32]}...", expanded=False):
+            with st.expander(f"🎬 {s.get('title', 'Video')[:30]}...", expanded=False):
                 st.image(thumb, use_container_width=True)
                 st.caption(f"Channel: {s.get('channel', 'YouTube')} | Duration: {dur_str}")
                 if status == "ready":
-                    st.markdown('<span class="badge-ready">✓ Ready</span>', unsafe_allow_html=True)
+                    st.markdown(":green[✓ Ready]")
                 elif status == "transcribing":
-                    st.markdown('<span class="badge-transcribing">⏳ Transcribing...</span>', unsafe_allow_html=True)
+                    st.markdown(":blue[⏳ Transcribing...]")
                 elif status == "error":
-                    st.markdown('<span class="badge-error">⚠️ Error</span>', unsafe_allow_html=True)
+                    st.markdown(":red[⚠️ Error]")
                 else:
                     st.caption("Queued")
 
@@ -268,10 +194,10 @@ with st.sidebar:
                     st.rerun()
 
     # 8-Key Monitor in Sidebar
-    st.markdown("---")
+    st.divider()
     with st.expander("⚡ 8-Key Groq Pool Monitor", expanded=False):
         matrix_stats = groq_router.get_router_matrix_stats()
-        st.caption(f"Total Keys: {matrix_stats.get('total_keys', 8)} | Caseload Active")
+        st.caption(f"Total Keys: {matrix_stats.get('total_keys', 8)}")
         for k in matrix_stats.get("key_stats", []):
             st.markdown(f"**Key #{k['key_index']}** `{k['masked_key']}`: 🎙️ {k['transcriptions']} | 💬 {k['completions']}")
 
@@ -349,7 +275,7 @@ with tab_chat:
 
 # ----------------- TAB 2: Studio Notes & 4-Way Exporters -----------------
 with tab_studio:
-    st.markdown("### 🛠️ Study Studio & 4-Way Multi-Format Exporters")
+    st.subheader("🛠️ Study Studio & Multi-Format Exporters")
     st.caption("Generate publication-ready academic documents and download as **Markdown**, **Academic LaTeX**, **Compiled PDF**, or **Standalone HTML**.")
 
     col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
@@ -399,14 +325,14 @@ with tab_studio:
                 except Exception as e:
                     st.error(f"Mind map generation failed: {e}")
 
-    st.markdown("---")
+    st.divider()
 
     # Render Current Artifact & Download Center
     artifacts = Storage.get_notebook_artifacts(notebook_id)
     if artifacts:
         current_art = st.session_state.get("current_artifact") or artifacts[0]
         
-        st.markdown(f"## 📖 {current_art.get('title', 'Study Document')}")
+        st.subheader(f"📖 {current_art.get('title', 'Study Document')}")
         
         # 4 Export Download Buttons
         doc_title = current_art.get("title", "Study_Notes")
@@ -463,14 +389,14 @@ with tab_studio:
                 use_container_width=True
             )
 
-        st.markdown("---")
+        st.divider()
         st.markdown(md_content)
     else:
         st.info("No study artifacts generated yet. Click any button above to synthesize your videos!")
 
 # ----------------- TAB 3: Transcripts & Topics Index -----------------
 with tab_transcripts:
-    st.markdown("### 🎙️ Lecture Transcripts & Indexed Topic Boundaries")
+    st.subheader("🎙️ Lecture Transcripts & Indexed Topic Boundaries")
     
     sources_with_transcripts = [s for s in Storage.get_sources(notebook_id) if s.get("status") == "ready"]
     if not sources_with_transcripts:
@@ -484,7 +410,7 @@ with tab_transcripts:
         
         if selected_source:
             # 1. Structured Topic Map
-            st.markdown("#### 🗺️ Extracted Topic Boundaries")
+            st.subheader("🗺️ Extracted Topic Boundaries")
             topics = Storage.get_source_topic_index(selected_source["id"])
             if topics:
                 for t in topics:
@@ -498,7 +424,7 @@ with tab_transcripts:
                 st.caption("Topic indexing in progress or empty for this source.")
 
             # 2. Raw Timestamped Transcript
-            st.markdown("#### 📜 Full Monotonic Transcript")
+            st.subheader("📜 Full Monotonic Transcript")
             trans = Storage.get_transcript(selected_source["id"])
             if trans and trans.get("segments"):
                 for seg in trans["segments"]:
