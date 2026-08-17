@@ -250,6 +250,9 @@ class Storage:
             sources.append(d)
         return sources
 
+    get_sources = get_sources_for_notebook
+    list_sources = get_sources_for_notebook
+
     @staticmethod
     def delete_source(source_id: str):
         conn = get_db()

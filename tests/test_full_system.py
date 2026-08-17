@@ -42,6 +42,11 @@ def test_storage_notebook_crud():
     assert source is not None
     source_id = source["id"]
 
+    # Verify get_sources and list_sources aliases
+    sources = Storage.get_sources(nb_id)
+    assert len(sources) >= 1
+    assert Storage.list_sources(nb_id) == sources
+
     # 4. Save Transcript
     sample_segments = [
         {"start": 0.0, "end": 15.0, "text": "Welcome to Dijkstra shortest path algorithm.", "timestamp_str": "00:00"},
