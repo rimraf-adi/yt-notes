@@ -100,7 +100,7 @@ class GroqKeyModelRouter:
 
         self.round_robin_pointers: Dict[str, int] = {m: 0 for m in all_models}
 
-    def _select_best_slot(self, model: str) -> KeyModelSlot:
+    def _select_best_slot(self, model: str, allow_cooldown: bool = True) -> Optional[KeyModelSlot]:
         """
         Selects the best available key for a given model:
         1. Filters out keys in cooldown.
@@ -118,12 +118,13 @@ class GroqKeyModelRouter:
             available_slots = [s for s in self.slots[model] if s.is_available]
 
             if not available_slots:
-                # If all slots in cooldown, pick the one that expires soonest
+                if not allow_cooldown:
+                    return None
+                # If all slots in cooldown and allow_cooldown=True, pick earliest
                 earliest_slot = min(self.slots[model], key=lambda s: s.cooldown_until)
                 wait_sec = max(0.0, earliest_slot.cooldown_until - time.time())
-                logger.info(f"All keys for {model} are busy. Waiting {wait_sec:.2f}s for Key #{earliest_slot.key_idx + 1}")
                 if wait_sec > 0:
-                    time.sleep(min(wait_sec, 4.0))
+                    time.sleep(min(wait_sec, 2.0))
                 return earliest_slot
 
             # Least-loaded key selection with round-robin priority
@@ -175,7 +176,12 @@ class GroqKeyModelRouter:
                     break
                 attempt_count += 1
 
-                slot = self._select_best_slot(current_model)
+                # Select available slot without blocking on dead model
+                slot = self._select_best_slot(current_model, allow_cooldown=False)
+                if not slot:
+                    logger.info(f"All keys for model '{current_model}' in cooldown. Cascading to next model...")
+                    break
+
                 try:
                     logger.info(f"⚡ [Throughput Router] Key #{slot.key_idx + 1} -> Model: {current_model}")
                     response = slot.client.chat.completions.create(
@@ -202,8 +208,8 @@ class GroqKeyModelRouter:
                         # If org-level TPM limit reached for this specific model, immediately advance to next model
                         if "TPM" in err_msg or "tokens per minute" in err_msg or "Rate limit reached for model" in err_msg:
                             logger.warning(f"⚠️ Model '{current_model}' hit Org TPM limit. Cascading immediately to next model...")
-                            for s in self.slots_by_model.get(current_model, []):
-                                s.cooldown_until = time.time() + 20.0
+                            for s in self.slots.get(current_model, []):
+                                s.cooldown_until = time.time() + 25.0
                             last_error = e
                             break # Skip remaining keys on this exhausted model and cascade!
                     last_error = e
@@ -222,6 +228,24 @@ class GroqKeyModelRouter:
                         slot.inflight_requests = max(0, slot.inflight_requests - 1)
                     logger.error(f"Error on Key #{slot.key_idx + 1} ({current_model}): {e}")
                     last_error = e
+
+        # Final safety attempt: allow earliest cooldown slot across any model
+        for fallback_model in candidate_models:
+            try:
+                slot = self._select_best_slot(fallback_model, allow_cooldown=True)
+                if slot:
+                    response = slot.client.chat.completions.create(
+                        model=fallback_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens
+                    )
+                    with self.lock:
+                        slot.inflight_requests = max(0, slot.inflight_requests - 1)
+                        slot.mark_success()
+                    return response.choices[0].message.content or ""
+            except Exception:
+                continue
 
         raise RuntimeError(f"Chat failed across all {len(self.keys)} keys & model cascades: {last_error}")
 
@@ -250,7 +274,10 @@ class GroqKeyModelRouter:
                     break
                 attempt_count += 1
 
-                slot = self._select_best_slot(current_model)
+                slot = self._select_best_slot(current_model, allow_cooldown=False)
+                if not slot:
+                    break
+
                 try:
                     response = slot.client.chat.completions.create(
                         model=current_model,
@@ -271,9 +298,15 @@ class GroqKeyModelRouter:
                     return
 
                 except RateLimitError as e:
+                    err_msg = str(e)
                     with self.lock:
                         slot.inflight_requests = max(0, slot.inflight_requests - 1)
-                        slot.mark_error(cooldown_duration=45.0)
+                        slot.mark_error(cooldown_duration=30.0)
+                        if "TPM" in err_msg or "tokens per minute" in err_msg or "Rate limit reached for model" in err_msg:
+                            for s in self.slots.get(current_model, []):
+                                s.cooldown_until = time.time() + 25.0
+                            last_error = e
+                            break
                     last_error = e
                 except Exception as e:
                     with self.lock:
