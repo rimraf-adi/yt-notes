@@ -292,6 +292,54 @@ class Storage:
         return res
 
     @staticmethod
+    def get_transcript_by_video_id(video_id: str) -> Optional[Dict[str, Any]]:
+        """Look up existing transcript by YouTube video_id across any notebook."""
+        if not video_id:
+            return None
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT t.full_text, t.segments_json, s.id as source_id, s.title, s.duration, s.channel
+            FROM transcripts t
+            JOIN sources s ON t.source_id = s.id
+            WHERE s.video_id = ?
+            LIMIT 1
+            """,
+            (video_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        res = dict(row)
+        res["segments"] = json.loads(res.get("segments_json") or "[]")
+        return res
+
+    @staticmethod
+    def get_topic_index_by_video_id(video_id: str) -> List[Dict[str, Any]]:
+        """Look up existing topic index by YouTube video_id across any notebook."""
+        if not video_id:
+            return []
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT ti.topics_json
+            FROM topic_index ti
+            JOIN sources s ON ti.source_id = s.id
+            WHERE s.video_id = ?
+            LIMIT 1
+            """,
+            (video_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return []
+        return json.loads(dict(row).get("topics_json") or "[]")
+
+    @staticmethod
     def save_topic_index(source_id: str, notebook_id: str, topics: List[Dict[str, Any]]) -> Dict[str, Any]:
         conn = get_db()
         cursor = conn.cursor()

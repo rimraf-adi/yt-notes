@@ -114,43 +114,65 @@ with st.sidebar:
                         src_title = src.get("title", "Video")
                         prog_bar.progress(int((idx / len(registered)) * 100), text=f"Processing ({idx+1}/{len(registered)}): {src_title[:30]}...")
 
-                        # Check transcript cache
-                        existing_trans = Storage.get_transcript(src["id"])
-                        if not existing_trans:
-                            # 1. Download
-                            def update_dl_pct(p, msg):
-                                pass
-                            meta = YouTubeDownloader.download_audio(src["url"], src["id"], progress_callback=update_dl_pct)
+                        vid_id = src.get("video_id", "") or YouTubeDownloader.extract_video_id(src.get("url", ""))
+
+                        # ⚡ 1. Check if video was previously transcribed (Zero-Download Cache Hit)
+                        cached_trans = Storage.get_transcript_by_video_id(vid_id)
+                        if cached_trans:
+                            logger.info(f"⚡ [Cache Hit] Reusing transcript for {vid_id} without downloading!")
+                            Storage.save_transcript(src["id"], cached_trans["full_text"], cached_trans["segments"])
+                            
+                            # Copy cached topics
+                            cached_topics = Storage.get_topic_index_by_video_id(vid_id)
+                            if cached_topics:
+                                for t in cached_topics:
+                                    t["source_id"] = src["id"]
+                                Storage.save_topic_index(src["id"], notebook_id, cached_topics)
+
                             Storage.update_source_status(
                                 src["id"],
-                                status="transcribing",
-                                progress=55.0,
-                                title=meta["title"],
-                                video_id=meta["video_id"],
-                                channel=meta["channel"],
-                                duration=meta["duration"],
-                                thumbnail_url=meta["thumbnail_url"],
-                                audio_path=meta["audio_path"],
-                                chapters=meta["chapters"]
+                                status="ready",
+                                progress=100.0,
+                                title=cached_trans.get("title") or src.get("title"),
+                                duration=cached_trans.get("duration") or src.get("duration", 0),
+                                channel=cached_trans.get("channel") or src.get("channel", "YouTube")
                             )
+                            continue
 
-                            # 2. Transcribe with Whisper Large
-                            Transcriber.process_source_audio(
-                                source_id=src["id"],
-                                audio_path=meta["audio_path"]
-                            )
+                        # 2. Download audio if not in transcript cache
+                        def update_dl_pct(p, msg):
+                            pass
+                        meta = YouTubeDownloader.download_audio(src["url"], src["id"], progress_callback=update_dl_pct)
+                        Storage.update_source_status(
+                            src["id"],
+                            status="transcribing",
+                            progress=55.0,
+                            title=meta["title"],
+                            video_id=meta["video_id"],
+                            channel=meta["channel"],
+                            duration=meta["duration"],
+                            thumbnail_url=meta["thumbnail_url"],
+                            audio_path=meta["audio_path"],
+                            chapters=meta["chapters"]
+                        )
 
-                            # 3. Topic Index
-                            try:
-                                TopicIndexer.index_source_topics(src["id"])
-                            except Exception as te:
-                                logger.warning(f"Topic indexing warning: {te}")
+                        # 3. Transcribe with Whisper Large
+                        Transcriber.process_source_audio(
+                            source_id=src["id"],
+                            audio_path=meta["audio_path"]
+                        )
 
-                            # 4. Clean up audio files from disk immediately to save space
-                            YouTubeDownloader.cleanup_audio_files(src["id"], meta.get("audio_path"))
+                        # 4. Topic Index
+                        try:
+                            TopicIndexer.index_source_topics(src["id"])
+                        except Exception as te:
+                            logger.warning(f"Topic indexing warning: {te}")
 
-                            # 5. Mark ready
-                            Storage.update_source_status(src["id"], status="ready", progress=100.0)
+                        # 5. Clean up audio files from disk immediately to save space
+                        YouTubeDownloader.cleanup_audio_files(src["id"], meta.get("audio_path"))
+
+                        # 6. Mark ready
+                        Storage.update_source_status(src["id"], status="ready", progress=100.0)
 
                     prog_bar.progress(100, text="✅ All videos ingested and indexed!")
                     time.sleep(1)

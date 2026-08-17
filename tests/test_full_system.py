@@ -61,6 +61,11 @@ def test_storage_notebook_crud():
     assert fetched_t is not None
     assert len(fetched_t["segments"]) == 3
 
+    # Test cache lookup by video_id
+    cached_t = Storage.get_transcript_by_video_id("dQw4w9WgXcQ")
+    assert cached_t is not None
+    assert cached_t["full_text"] == full_text
+
     # 5. Save Topic Index
     topics = [
         {
