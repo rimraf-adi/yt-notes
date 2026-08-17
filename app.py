@@ -28,17 +28,30 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ----------------- Session State Initialization -----------------
-# On every launch/refresh, initialize a new clean notebook unless explicitly preserved
-if "notebook_id" not in st.session_state:
-    now_str = datetime.now().strftime("%I:%M %p")
-    new_nb = Storage.create_notebook(f"Study Notebook ({now_str})")
-    st.session_state.notebook_id = new_nb["id"]
-    st.session_state.notebook_title = new_nb["title"]
-    st.session_state.chat_history = []
-    st.session_state.current_artifact = None
+# ----------------- Persistent Session & Query Params -----------------
+# 1. Check URL query params first, then session state, then SQLite database
+active_nb_id = st.query_params.get("notebook_id") or st.session_state.get("notebook_id")
+active_nb = Storage.get_notebook(active_nb_id) if active_nb_id else None
 
-notebook_id = st.session_state.notebook_id
+if not active_nb:
+    # If no valid notebook is active, load the most recent notebook from SQLite
+    all_nbs = Storage.list_notebooks()
+    if all_nbs:
+        active_nb = all_nbs[0]
+    else:
+        # Create initial notebook only if database is completely empty
+        now_str = datetime.now().strftime("%I:%M %p")
+        active_nb = Storage.create_notebook(f"Study Notebook ({now_str})")
+
+notebook_id = active_nb["id"]
+st.session_state.notebook_id = notebook_id
+st.session_state.notebook_title = active_nb["title"]
+st.query_params["notebook_id"] = notebook_id
+
+# Restore current studio artifact if not in session state
+if "current_artifact" not in st.session_state or st.session_state.current_artifact is None:
+    saved_artifacts = Storage.get_notebook_artifacts(notebook_id)
+    st.session_state.current_artifact = saved_artifacts[0] if saved_artifacts else None
 
 # ----------------- Sidebar: Sources & Notebook Manager -----------------
 with st.sidebar:
@@ -58,16 +71,18 @@ with st.sidebar:
             st.session_state.notebook_title = new_nb["title"]
             st.session_state.chat_history = []
             st.session_state.current_artifact = None
+            st.query_params["notebook_id"] = new_nb["id"]
             st.rerun()
 
     all_notebooks = Storage.list_notebooks()
     if len(all_notebooks) > 1:
         nb_options = {nb["id"]: nb["title"] for nb in all_notebooks}
+        current_idx = list(nb_options.keys()).index(notebook_id) if notebook_id in nb_options else 0
         selected_nb_id = st.selectbox(
             "Switch Notebook",
             options=list(nb_options.keys()),
             format_func=lambda x: nb_options[x],
-            index=list(nb_options.keys()).index(notebook_id) if notebook_id in nb_options else 0,
+            index=current_idx,
             label_visibility="collapsed"
         )
         if selected_nb_id != notebook_id:
@@ -76,6 +91,7 @@ with st.sidebar:
             st.session_state.chat_history = Storage.get_chat_history(selected_nb_id)
             artifacts = Storage.get_notebook_artifacts(selected_nb_id)
             st.session_state.current_artifact = artifacts[0] if artifacts else None
+            st.query_params["notebook_id"] = selected_nb_id
             st.rerun()
 
     st.divider()
