@@ -34,25 +34,112 @@ function initMermaid() {
 // ----------------- Notebook Management -----------------
 async function loadDefaultNotebook() {
   try {
-    const res = await fetch("/api/notebooks");
-    const notebooks = await res.json();
-    if (notebooks.length > 0) {
-      currentNotebookId = notebooks[0].id;
-      document.getElementById("currentNotebookTitle").textContent = notebooks[0].title;
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedNotebookId = urlParams.get("notebook_id");
+
+    if (requestedNotebookId) {
+      currentNotebookId = requestedNotebookId;
+      await loadNotebookDetails(currentNotebookId);
     } else {
-      const createRes = await fetch("/api/notebooks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "YouTube Master Class Notebook" })
-      });
-      const newNb = await createRes.json();
-      currentNotebookId = newNb.id;
-      document.getElementById("currentNotebookTitle").textContent = newNb.title;
+      // User directive: On every launch/refresh, start with a fresh clean new notebook
+      await createNewNotebook(false);
     }
-    loadNotebookDetails(currentNotebookId);
+    await refreshNotebookDropdown();
   } catch (err) {
     console.error("Failed loading default notebook:", err);
   }
+}
+
+async function createNewNotebook(promptForTitle = true) {
+  try {
+    let title = "New Notebook";
+    if (promptForTitle) {
+      const userTitle = prompt("Enter title for the new notebook:", "New Study Notebook");
+      if (userTitle && userTitle.trim()) title = userTitle.trim();
+    } else {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      title = `Study Notebook (${timeStr})`;
+    }
+
+    const createRes = await fetch("/api/notebooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title })
+    });
+    const newNb = await createRes.json();
+    currentNotebookId = newNb.id;
+    document.getElementById("currentNotebookTitle").textContent = newNb.title;
+
+    // Reset artifacts & chat UI for clean start
+    resetWorkspaceForNewNotebook();
+    await loadNotebookDetails(currentNotebookId);
+    await refreshNotebookDropdown();
+  } catch (err) {
+    console.error("Error creating new notebook:", err);
+  }
+}
+
+function resetWorkspaceForNewNotebook() {
+  document.getElementById("sourcesList").innerHTML = `
+    <div class="empty-state">
+      <i class="fa-solid fa-cloud-arrow-up empty-icon"></i>
+      <p>No video sources yet</p>
+      <span>Paste a YouTube video or playlist link above to transcribe with Groq Whisper Large</span>
+    </div>
+  `;
+  document.getElementById("sourcesCount").textContent = "0";
+  document.getElementById("activeSourcesCountBadge").textContent = "0 / 0 sources ready";
+  document.getElementById("chatConversation").innerHTML = `
+    <div class="chat-welcome-card">
+      <div class="welcome-badge"><i class="fa-solid fa-graduation-cap"></i> YouTube NotebookLM Ready</div>
+      <h2>Explore Your Video Knowledge Base</h2>
+      <p>Ask in-depth questions across your ingested YouTube lectures, courses, and playlists. Every answer is grounded with clickable timestamped source citations.</p>
+      <div class="welcome-prompts">
+        <button class="prompt-chip" onclick="fillChatInput('Give me an executive summary with key takeaways from all lectures.')">📌 Executive Summary & Key Takeaways</button>
+        <button class="prompt-chip" onclick="fillChatInput('Extract all formulas, algorithms, and key principles mentioned.')">💻 Formulas & Code Implementations</button>
+        <button class="prompt-chip" onclick="fillChatInput('Generate a 5-question active recall test based on these topics.')">❓ Practice Quiz & Active Recall</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("artifactContainer").innerHTML = `
+    <div class="empty-state">
+      <i class="fa-solid fa-wand-magic-sparkles empty-icon"></i>
+      <p>No Artifact Generated Yet</p>
+      <span>Click "Lecture Notes", "Study Guide", or "Mind Map" in the center panel to synthesize your videos into publication-ready notes.</span>
+    </div>
+  `;
+}
+
+async function refreshNotebookDropdown() {
+  try {
+    const res = await fetch("/api/notebooks");
+    const notebooks = await res.json();
+    const dropdown = document.getElementById("notebookSelectDropdown");
+    if (!dropdown) return;
+
+    dropdown.innerHTML = '<option value="">Switch Notebook...</option>';
+    notebooks.forEach(nb => {
+      const opt = document.createElement("option");
+      opt.value = nb.id;
+      opt.textContent = nb.title;
+      if (nb.id === currentNotebookId) opt.selected = true;
+      dropdown.appendChild(opt);
+    });
+  } catch (err) {
+    console.error("Failed refreshing notebook dropdown:", err);
+  }
+}
+
+async function switchNotebook(notebookId) {
+  if (!notebookId || notebookId === currentNotebookId) return;
+  currentNotebookId = notebookId;
+  const dropdown = document.getElementById("notebookSelectDropdown");
+  const selectedOpt = dropdown.options[dropdown.selectedIndex];
+  if (selectedOpt) {
+    document.getElementById("currentNotebookTitle").textContent = selectedOpt.textContent;
+  }
+  await loadNotebookDetails(currentNotebookId);
 }
 
 async function loadNotebookDetails(notebookId) {
@@ -60,6 +147,10 @@ async function loadNotebookDetails(notebookId) {
     const res = await fetch(`/api/notebooks/${notebookId}`);
     if (!res.ok) return;
     const data = await res.json();
+
+    if (data.notebook) {
+      document.getElementById("currentNotebookTitle").textContent = data.notebook.title;
+    }
 
     // Render Sources
     renderSources(data.sources);
@@ -70,6 +161,14 @@ async function loadNotebookDetails(notebookId) {
     // Render Latest Artifact if available
     if (data.artifacts && data.artifacts.length > 0) {
       displayArtifact(data.artifacts[0]);
+    } else {
+      document.getElementById("artifactContainer").innerHTML = `
+        <div class="empty-state">
+          <i class="fa-solid fa-wand-magic-sparkles empty-icon"></i>
+          <p>No Artifact Generated Yet</p>
+          <span>Click "Lecture Notes", "Study Guide", or "Mind Map" in the center panel to synthesize your videos into publication-ready notes.</span>
+        </div>
+      `;
     }
 
     // Start progress polling if any source is pending/downloading/transcribing
@@ -740,6 +839,18 @@ function setupEventListeners() {
     switchStudioTab("keys");
   });
 
+  // New Notebook Button
+  const newNbBtn = document.getElementById("newNotebookBtn");
+  if (newNbBtn) {
+    newNbBtn.addEventListener("click", () => createNewNotebook(true));
+  }
+
+  // Notebook Switcher Dropdown
+  const nbDropdown = document.getElementById("notebookSelectDropdown");
+  if (nbDropdown) {
+    nbDropdown.addEventListener("change", (e) => switchNotebook(e.target.value));
+  }
+
   // Rename Notebook Button
   document.getElementById("renameNotebookBtn").addEventListener("click", async () => {
     const titleEl = document.getElementById("currentNotebookTitle");
@@ -747,7 +858,6 @@ function setupEventListeners() {
     const newName = prompt("Enter new Notebook Title:", currentName);
     if (newName && newName.trim() && newName.trim() !== currentName) {
       titleEl.textContent = newName.trim();
-      // Update notebook title in DB if endpoint available or state
     }
   });
 }

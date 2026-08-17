@@ -129,6 +129,22 @@ body {
   font-size: 14px;
 }
 
+.notebook-dropdown {
+  background: #0f172a;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  max-width: 160px;
+}
+
+.notebook-dropdown:focus {
+  border-color: var(--primary);
+}
+
 .header-right {
   display: flex;
   align-items: center;
