@@ -146,9 +146,47 @@ class NoteExporter:
         return str(file_path)
 
     @staticmethod
+    def _normalize_text_for_pdf(text: str) -> str:
+        """Normalizes unicode special characters for ReportLab PDF rendering."""
+        replacements = {
+            '\u2011': '-', # non-breaking hyphen
+            '\u2012': '-', # figure dash
+            '\u2013': '-', # en dash
+            '\u2014': ' -- ', # em dash
+            '\u2015': ' -- ', # horizontal bar
+            '\u2018': "'", # left single quote
+            '\u2019': "'", # right single quote
+            '\u201a': "'",
+            '\u201b': "'",
+            '\u201c': '"', # left double quote
+            '\u201d': '"', # right double quote
+            '\u201e': '"',
+            '\u201f': '"',
+            '\u00a0': ' ', # non-breaking space
+            '\u2026': '...', # ellipsis
+            '\u2212': '-', # minus sign
+            '\u2192': '->', # right arrow
+            '\u2190': '<-', # left arrow
+            '\u2194': '<->', # left right arrow
+            '\u2264': '<=', # less than or equal
+            '\u2265': '>=', # greater than or equal
+            '\u2260': '!=', # not equal
+            '\u221e': 'inf', # infinity
+            '\u2200': 'FORALL ', # forall
+            '\u2203': 'EXISTS ', # exists
+            '\u2208': ' IN ', # in
+            '\u2229': ' AND ',
+            '\u222a': ' OR ',
+            '\u00d7': 'x', # multiplication
+        }
+        for char, repl in replacements.items():
+            text = text.replace(char, repl)
+        return text
+
+    @staticmethod
     def markdown_to_pdf(title: str, author: str, md_content: str, output_filename: Optional[str] = None) -> str:
         """
-        3. Compiled PDF (.pdf) Export
+        3. Compiled PDF (.pdf) Export with Full Unicode Normalization & Table Support
         """
         if not output_filename:
             safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title)[:40]
@@ -158,10 +196,10 @@ class NoteExporter:
         doc = SimpleDocTemplate(
             file_path,
             pagesize=letter,
-            rightMargin=45,
-            leftMargin=45,
-            topMargin=45,
-            bottomMargin=45
+            rightMargin=40,
+            leftMargin=40,
+            topMargin=40,
+            bottomMargin=40
         )
 
         styles = getSampleStyleSheet()
@@ -170,31 +208,31 @@ class NoteExporter:
             'DocTitle',
             parent=styles['Heading1'],
             fontName='Helvetica-Bold',
-            fontSize=22,
-            leading=26,
+            fontSize=20,
+            leading=24,
             textColor=colors.HexColor('#0f172a'),
-            spaceAfter=6
+            spaceAfter=4
         )
 
         subtitle_style = ParagraphStyle(
             'DocSubTitle',
             parent=styles['Normal'],
             fontName='Helvetica',
-            fontSize=10,
-            leading=14,
+            fontSize=9.5,
+            leading=13,
             textColor=colors.HexColor('#64748b'),
-            spaceAfter=15
+            spaceAfter=12
         )
 
         h1_style = ParagraphStyle(
             'SectionH1',
             parent=styles['Heading2'],
             fontName='Helvetica-Bold',
-            fontSize=15,
-            leading=19,
+            fontSize=14,
+            leading=18,
             textColor=colors.HexColor('#1e40af'),
-            spaceBefore=14,
-            spaceAfter=6,
+            spaceBefore=12,
+            spaceAfter=4,
             keepWithNext=True
         )
 
@@ -202,11 +240,11 @@ class NoteExporter:
             'SectionH2',
             parent=styles['Heading3'],
             fontName='Helvetica-Bold',
-            fontSize=12,
-            leading=16,
+            fontSize=11.5,
+            leading=15,
             textColor=colors.HexColor('#334155'),
-            spaceBefore=10,
-            spaceAfter=4,
+            spaceBefore=8,
+            spaceAfter=3,
             keepWithNext=True
         )
 
@@ -214,50 +252,131 @@ class NoteExporter:
             'Body',
             parent=styles['Normal'],
             fontName='Helvetica',
-            fontSize=10,
-            leading=14,
+            fontSize=9.5,
+            leading=13.5,
             textColor=colors.HexColor('#1e293b'),
-            spaceAfter=6
+            spaceAfter=5
         )
 
         bullet_style = ParagraphStyle(
             'Bullet',
             parent=styles['Normal'],
             fontName='Helvetica',
-            fontSize=9.5,
-            leading=13.5,
+            fontSize=9,
+            leading=13,
             textColor=colors.HexColor('#1e293b'),
-            leftIndent=15,
-            firstLineIndent=-10,
-            spaceAfter=3
+            leftIndent=12,
+            firstLineIndent=-8,
+            spaceAfter=2
+        )
+
+        table_header_style = ParagraphStyle(
+            'TableHeader',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=8.5,
+            leading=11,
+            textColor=colors.HexColor('#0f172a')
+        )
+
+        table_cell_style = ParagraphStyle(
+            'TableCell',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=8,
+            leading=10.5,
+            textColor=colors.HexColor('#334155')
         )
 
         code_style = ParagraphStyle(
             'CodeBlock',
             fontName='Courier',
-            fontSize=8.5,
-            leading=11.5,
+            fontSize=8,
+            leading=10.5,
             textColor=colors.HexColor('#0f172a'),
             backColor=colors.HexColor('#f1f5f9'),
-            borderPadding=6,
-            spaceBefore=6,
-            spaceAfter=6
+            borderPadding=5,
+            spaceBefore=4,
+            spaceAfter=4
+        )
+
+        math_style = ParagraphStyle(
+            'MathBlock',
+            fontName='Courier-Oblique',
+            fontSize=8.5,
+            leading=11.5,
+            textColor=colors.HexColor('#1e3a8a'),
+            backColor=colors.HexColor('#f0f9ff'),
+            borderPadding=5,
+            spaceBefore=4,
+            spaceAfter=4
         )
 
         story = []
 
         # Header Title
-        story.append(Paragraph(html.escape(title), title_style))
-        story.append(Paragraph(f"<b>Generated by YouTube NotebookLM</b> | {html.escape(author)}", subtitle_style))
-        story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#3b82f6'), spaceAfter=14))
+        clean_title = NoteExporter._normalize_text_for_pdf(title)
+        clean_author = NoteExporter._normalize_text_for_pdf(author)
+        story.append(Paragraph(html.escape(clean_title), title_style))
+        story.append(Paragraph(f"<b>Generated by YouTube NotebookLM</b> | {html.escape(clean_author)}", subtitle_style))
+        story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#3b82f6'), spaceAfter=10))
 
+        # Pre-normalize entire markdown content
+        normalized_content = NoteExporter._normalize_text_for_pdf(md_content)
+        lines = normalized_content.split("\n")
+        
         in_code = False
         code_lines = []
+        in_table = False
+        table_rows = []
 
-        for raw_line in md_content.split("\n"):
+        def flush_table():
+            nonlocal table_rows, in_table
+            if not table_rows:
+                in_table = False
+                return
+            
+            # Format rows with Paragraphs
+            formatted_data = []
+            for r_idx, row in enumerate(table_rows):
+                row_cells = []
+                is_header = (r_idx == 0)
+                st_to_use = table_header_style if is_header else table_cell_style
+                for c in row:
+                    cell_p = Paragraph(html.escape(c.strip()), st_to_use)
+                    row_cells.append(cell_p)
+                if row_cells:
+                    formatted_data.append(row_cells)
+
+            if formatted_data:
+                col_count = max(len(r) for r in formatted_data)
+                col_w = min(510 / col_count, 220)
+                t = Table(formatted_data, colWidths=[col_w] * col_count)
+                t.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#e2e8f0')),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#0f172a')),
+                    ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
+                    ('TOPPADDING', (0,0), (-1,-1), 4),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                    ('LEFTPADDING', (0,0), (-1,-1), 5),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                ]))
+                story.append(Spacer(1, 4))
+                story.append(t)
+                story.append(Spacer(1, 4))
+            
+            table_rows = []
+            in_table = False
+
+        for raw_line in lines:
             line = raw_line.strip()
             
+            # Code block handling
             if line.startswith("```"):
+                if in_table:
+                    flush_table()
                 if in_code:
                     code_text = html.escape("\n".join(code_lines))
                     story.append(Preformatted(code_text, code_style))
@@ -271,39 +390,89 @@ class NoteExporter:
                 code_lines.append(raw_line)
                 continue
 
+            # Markdown Table detection
+            if line.startswith("|") and line.endswith("|"):
+                # Check if it's separator row |---|---|
+                if set(line.replace("|", "").replace("-", "").replace(":", "").strip()) == set():
+                    continue
+                cells = [c.strip() for c in line.split("|")[1:-1]]
+                if cells:
+                    in_table = True
+                    table_rows.append(cells)
+                continue
+            elif in_table:
+                flush_table()
+
             if not line:
-                story.append(Spacer(1, 4))
+                story.append(Spacer(1, 3))
                 continue
 
-            processed = html.escape(line)
-            processed = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', processed)
-            processed = re.sub(r'`(.*?)`', r'<font name="Courier" color="#2563eb">\1</font>', processed)
+            # Math display block handling ($$ or \[ ... \])
+            if (line.startswith("$$") and line.endswith("$$")) or line.startswith("\\[") or line.startswith("\\]") or line.startswith("\\["):
+                clean_math = line.replace("$$", "").replace("\\[", "").replace("\\]", "").strip()
+                if clean_math:
+                    story.append(Preformatted(clean_math, math_style))
+                continue
 
+            # Horizontal rules
+            if line in ["---", "***", "___"]:
+                story.append(HRFlowable(width="100%", thickness=0.8, color=colors.HexColor('#cbd5e1'), spaceBefore=6, spaceAfter=6))
+                continue
+
+            # Parse line prefixes safely BEFORE html escaping
             if line.startswith("# "):
-                story.append(Paragraph(processed[2:], h1_style))
+                content = line[2:].strip()
+                escaped = html.escape(content)
+                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+                story.append(Paragraph(escaped, h1_style))
             elif line.startswith("## "):
-                story.append(Paragraph(processed[3:], h1_style))
+                content = line[3:].strip()
+                escaped = html.escape(content)
+                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+                story.append(Paragraph(escaped, h1_style))
             elif line.startswith("### "):
-                story.append(Paragraph(processed[4:], h2_style))
+                content = line[4:].strip()
+                escaped = html.escape(content)
+                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+                story.append(Paragraph(escaped, h2_style))
+            elif line.startswith("#### "):
+                content = line[5:].strip()
+                escaped = html.escape(content)
+                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+                story.append(Paragraph(escaped, h2_style))
             elif line.startswith("- ") or line.startswith("* "):
-                bullet_content = "&bull; " + processed[2:]
-                story.append(Paragraph(bullet_content, bullet_style))
+                content = line[2:].strip()
+                escaped = html.escape(content)
+                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+                escaped = re.sub(r'`(.*?)`', r'<font name="Courier" color="#2563eb">\1</font>', escaped)
+                story.append(Paragraph(f"&bull; {escaped}", bullet_style))
             elif line.startswith("> "):
-                callout_data = [[Paragraph(f"<b>Takeaway:</b> {processed[2:]}", body_style)]]
-                callout_table = Table(callout_data, colWidths=[500])
+                content = line[2:].strip()
+                escaped = html.escape(content)
+                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+                escaped = re.sub(r'`(.*?)`', r'<font name="Courier" color="#2563eb">\1</font>', escaped)
+                callout_data = [[Paragraph(f"<b>Key Takeaway:</b> {escaped}", body_style)]]
+                callout_table = Table(callout_data, colWidths=[510])
                 callout_table.setStyle(TableStyle([
                     ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#eff6ff')),
                     ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#60a5fa')),
-                    ('LEFTPADDING', (0,0), (-1,-1), 10),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 10),
-                    ('TOPPADDING', (0,0), (-1,-1), 6),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                    ('LEFTPADDING', (0,0), (-1,-1), 8),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 8),
+                    ('TOPPADDING', (0,0), (-1,-1), 5),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 5),
                 ]))
-                story.append(Spacer(1, 4))
+                story.append(Spacer(1, 3))
                 story.append(callout_table)
-                story.append(Spacer(1, 4))
+                story.append(Spacer(1, 3))
             else:
-                story.append(Paragraph(processed, body_style))
+                escaped = html.escape(line)
+                escaped = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', escaped)
+                escaped = re.sub(r'\*(.*?)\*', r'<i>\1</i>', escaped)
+                escaped = re.sub(r'`(.*?)`', r'<font name="Courier" color="#2563eb">\1</font>', escaped)
+                story.append(Paragraph(escaped, body_style))
+
+        if in_table:
+            flush_table()
 
         doc.build(story)
         return file_path
