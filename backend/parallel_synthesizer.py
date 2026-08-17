@@ -217,7 +217,8 @@ class ParallelSynthesizer:
     def synthesize_single_lecture(notebook_id: str, source_id: str) -> Dict[str, Any]:
         """
         Fast Single Lecture Parallel Synthesis:
-        Extracts subtopics for that single video and writes an in-depth lecture booklet.
+        Extracts subtopics for that single video and writes an in-depth, rigorous lecture compendium
+        with deep term explications, formal argument proofs, and thought experiment breakdowns.
         """
         source = Storage.get_source(source_id)
         if not source:
@@ -232,28 +233,52 @@ class ParallelSynthesizer:
             raise ValueError("Transcript not available for this source.")
 
         segments = t["segments"]
-        transcript_text = "\n".join([f"[{s.get('timestamp_str', '00:00')}] {s['text']}" for s in segments])
+        # Sample segments across the ENTIRE duration (start, middle, and end) up to 20,000 chars
+        if len(segments) > 150:
+            step = max(1, len(segments) // 150)
+            sampled_segments = segments[::step]
+        else:
+            sampled_segments = segments
+
+        transcript_text = "\n".join([f"[{s.get('timestamp_str', '00:00')}] {s['text']}" for s in sampled_segments])
+        if len(transcript_text) > 22000:
+            transcript_text = transcript_text[:22000] + "\n...[full lecture covered]"
+
+        topics_summary = "\n".join([f"- [{t.get('start_time', '00:00')} - {t.get('end_time', '00:00')}] {t['title']}: {t['summary']}" for t in topics])
 
         system_prompt = (
-            "You are an elite academic professor writing definitive lecture notes.\n"
+            "You are an elite professor and master textbook author writing comprehensive, publication-grade analytical lecture notes.\n"
             f"Lecture Title: {source['title']}\n"
-            f"Channel: {source.get('channel', 'YouTube')} | Duration: {int(source.get('duration', 0))}s\n\n"
-            "Format in Markdown:\n"
-            f"1. # {source['title']} - Comprehensive Lecture Notes\n"
-            "2. > Executive Summary: 3-4 sentence core thesis\n"
-            "3. ## Deep-Dive Topic Breakdowns: Numbered conceptual sections explaining theories, algorithms, math equations ($$...$$), workflows, or code\n"
-            "4. > Key Takeaways: Blockquote summary of essential exam/practical points\n"
-            "5. ## Chronological Timestamp Guide: Key milestones with exact [HH:MM:SS] timestamps\n"
-            "Produce comprehensive, rigorous notes with zero fluff."
+            f"Lecturer / Channel: {source.get('channel', 'YouTube')} | Duration: {int(source.get('duration', 0))}s\n\n"
+            "CRITICAL PEDAGOGICAL RULES:\n"
+            "1. UNPACK & EXPLICATE EVERY TERM: Whenever the lecturer introduces, mentions, or debates technical, philosophical, mathematical, or scientific concepts (e.g., dualism, physicalism, epiphenomenalism, personal identity criteria, deprivation accounts, algorithmic invariants, proofs), DO NOT merely mention them in passing. Fully explain the theoretical mechanics, formal definitions, historical context, and philosophical stakes behind every concept.\n"
+            "2. FORMALIZE THE ARGUMENTS: Structure key arguments into formal logical premises and conclusions: (Premise 1, Premise 2 ==> Conclusion). Detail the major thought experiments step-by-step.\n"
+            "3. OBJECTIONS & COUNTER-ARGUMENTS: Detail the objections, counter-examples, paradoxes, and edge cases raised by critics or the professor, alongside the philosophical rebuttals.\n"
+            "4. NO LAZY BULLET POINTS: Write rich, articulate, deeply analytical sections with clear conceptual hierarchy.\n"
+            "5. GROUNDED TIMESTAMP CITATIONS: Include exact [HH:MM:SS] timestamps for every major conceptual turning point.\n\n"
+            "REQUIRED FORMAT (MARKDOWN):\n"
+            f"# {source['title']} - Comprehensive Lecture Compendium\n"
+            "> Executive Summary: 3-4 sentence distillation of core theses and key philosophical/technical stakes.\n"
+            "## 1. Foundational Concepts & In-Depth Terminology Explication\n"
+            "Explain all core theories, paradigms, and technical terms introduced in this lecture in depth.\n"
+            "## 2. Core Theses & Formal Argument Deconstructions\n"
+            "Step-by-step breakdown of the speaker's main arguments with premises, conclusions, and formal representations.\n"
+            "## 3. Thought Experiments, Objections & Counter-Arguments\n"
+            "Detailed analysis of thought experiments, paradoxes, and philosophical debates explored.\n"
+            "## 4. Deep-Dive Conceptual Breakdown\n"
+            "Comprehensive numbered sections detailing each subtopic across the lecture.\n"
+            "## 5. Milestone Timestamp Guide\n"
+            "Chronological table of key conceptual moments with [HH:MM:SS] timestamps and takeaway summaries.\n"
+            "> Key Takeaways: High-yield summary of foundational principles and conclusions."
         )
 
-        user_prompt = f"Transcript with timestamps:\n\n{transcript_text[:8000]}\n\nWrite the complete lecture notes."
+        user_prompt = f"Key Topics Indexed:\n{topics_summary}\n\nTranscript with Timestamps across Full Lecture:\n\n{transcript_text}\n\nWrite the complete in-depth lecture notes now."
 
         md_content = groq_router.route_chat(
             [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             tier="heavy",
             temperature=0.2,
-            max_tokens=2500
+            max_tokens=4000
         )
 
         title = f"Lecture Notes: {source['title'][:40]}"
